@@ -6,8 +6,17 @@ services:
     environment:
       - VECTIMUS_HOST=0.0.0.0
       - VECTIMUS_PORT=8420
+      - VECTIMUS_WORKERS=2
+      # - VECTIMUS_API_KEY=changeme
+      # - VECTIMUS_API_KEYS=team1:key1,team2:key2
+      # - VECTIMUS_CORS_ORIGINS=https://dashboard.example.com
+      # --- TLS ---
+      # - VECTIMUS_SSL_CERTFILE=/certs/cert.pem
+      # - VECTIMUS_SSL_KEYFILE=/certs/key.pem
     volumes:
-      - vectimus-logs:/root/.vectimus/logs
+      - vectimus-logs:/home/vectimus/.vectimus/logs
+      # Mount your TLS certs into the container:
+      # - ./certs:/certs:ro
     restart: unless-stopped
 
 volumes:

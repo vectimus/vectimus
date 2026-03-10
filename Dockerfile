@@ -12,10 +12,11 @@ USER vectimus
 
 ENV VECTIMUS_HOST=0.0.0.0
 ENV VECTIMUS_PORT=8420
+ENV VECTIMUS_WORKERS=1
 
 EXPOSE 8420
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8420/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8420/healthz')" || exit 1
 
-CMD ["uvicorn", "vectimus.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8420"]
+CMD ["vectimus", "server", "start"]

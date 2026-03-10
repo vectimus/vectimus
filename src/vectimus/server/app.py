@@ -3,17 +3,34 @@
 from __future__ import annotations
 
 import hmac
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import vectimus
 from vectimus.core.evaluator import PolicyEngine
 from vectimus.core.loader import PolicyLoader
 from vectimus.core.session_store import SessionStore
+from vectimus.exporters.jsonl import JsonlExporter
 from vectimus.server.config import ServerConfig
 
 logger = structlog.get_logger(__name__)
+
+# Paths exempt from API key auth (probes + health).
+_AUTH_EXEMPT_PATHS = {"/health", "/healthz", "/ready"}
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
+    """Startup/shutdown lifecycle for the application."""
+    logger.info("server_starting", version=vectimus.__version__)
+    yield
+    logger.info("server_shutting_down")
+    # Close the exporter so any buffered writes are flushed.
+    if hasattr(app.state, "exporter"):
+        app.state.exporter.close()
 
 
 def create_app(config: ServerConfig | None = None) -> FastAPI:
@@ -28,7 +45,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="Vectimus",
         description="Deterministic governance for AI coding tools and autonomous agents",
-        version="0.1.0",
+        version=vectimus.__version__,
+        lifespan=_lifespan,
     )
 
     # When a custom policy_dir is set, load policies directly from that
@@ -54,21 +72,47 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         ttl_seconds=config.session_ttl_seconds,
     )
 
-    # API key middleware: when VECTIMUS_API_KEY is set, require it on
-    # all endpoints except /health.
-    if config.api_key:
+    # Single exporter instance shared across all requests
+    app.state.exporter = JsonlExporter(log_dir=config.log_dir)
+
+    # CORS middleware (only when origins are configured)
+    if config.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.cors_origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["X-Vectimus-Source", "X-Vectimus-API-Key", "Content-Type"],
+        )
+
+    # API key middleware: supports both single key and named keys.
+    # Probe endpoints (/health, /healthz, /ready) are always exempt.
+    api_key_lookup = config.resolve_api_keys()
+    if api_key_lookup:
 
         @app.middleware("http")
         async def check_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
-            """Reject requests missing a valid API key (except /health)."""
-            if request.url.path != "/health":
-                provided = request.headers.get("X-Vectimus-API-Key", "")
-                if not hmac.compare_digest(provided, config.api_key):
-                    logger.warning("auth_rejected", path=request.url.path)
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "Invalid or missing API key"},
-                    )
+            """Reject requests missing a valid API key."""
+            if request.url.path in _AUTH_EXEMPT_PATHS:
+                return await call_next(request)
+
+            provided = request.headers.get("X-Vectimus-API-Key", "")
+            matched_name: str | None = None
+            for key, name in api_key_lookup.items():
+                if hmac.compare_digest(provided, key):
+                    matched_name = name
+                    break
+
+            if matched_name is None:
+                logger.warning("auth_rejected", path=request.url.path)
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "Invalid or missing API key"},
+                )
+
+            # Stash identity for structured logging in routes
+            request.state.api_key_name = matched_name
             return await call_next(request)
 
     # Register routes
