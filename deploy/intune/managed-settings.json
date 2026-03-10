@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(terraform destroy*)",
+      "Bash(kubectl delete namespace*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(~/.ssh/*)",
+      "Read(~/.aws/*)"
+    ],
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "https://vectimus.internal.example.com/evaluate",
+            "timeout": 10,
+            "headers": {
+              "Authorization": "Bearer $VECTIMUS_API_KEY",
+              "X-Vectimus-Source": "claude-code"
+            },
+            "allowedEnvVars": ["VECTIMUS_API_KEY"]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "https://vectimus.internal.example.com/evaluate",
+            "timeout": 10,
+            "headers": {
+              "Authorization": "Bearer $VECTIMUS_API_KEY",
+              "X-Vectimus-Source": "claude-code"
+            },
+            "allowedEnvVars": ["VECTIMUS_API_KEY"]
+          }
+        ]
+      }
+    ]
+  },
+  "allowManagedHooksOnly": true,
+  "disableBypassPermissionsMode": "disable"
+}

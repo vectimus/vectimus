@@ -1,0 +1,14 @@
+services:
+  vectimus:
+    build: .
+    ports:
+      - "8420:8420"
+    environment:
+      - VECTIMUS_HOST=0.0.0.0
+      - VECTIMUS_PORT=8420
+    volumes:
+      - vectimus-logs:/root/.vectimus/logs
+    restart: unless-stopped
+
+volumes:
+  vectimus-logs:

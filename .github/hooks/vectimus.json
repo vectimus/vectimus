@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "/Users/jholland/Development/vectimus/vectimus/.venv/bin/python3 -m vectimus.shims.copilot"
+      }
+    ]
+  }
+}
