@@ -3,13 +3,13 @@
 ## Installation
 
 ```bash
-pip install vectimus
+pipx install vectimus
 ```
 
 Or with uv:
 
 ```bash
-uv pip install vectimus
+uv tool install vectimus
 ```
 
 ## Initialise

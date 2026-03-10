@@ -29,14 +29,14 @@ Vectimus intercepts every action an AI agent takes and evaluates it against [Ced
 Two commands. 81 rules active out of the box.
 
 ```bash
-pip install vectimus
+pipx install vectimus
 vectimus init
 ```
 
 Or with uv:
 
 ```bash
-uv pip install vectimus
+uv tool install vectimus
 vectimus init
 ```
 
