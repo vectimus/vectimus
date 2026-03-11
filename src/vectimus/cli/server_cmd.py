@@ -14,8 +14,9 @@ def server_cmd() -> None:
 
 
 @server_cmd.command("start")
-@click.option("--host", default=None, help="Bind host.  Default: 0.0.0.0.")
+@click.option("--host", default=None, help="Bind host.  Default: 127.0.0.1.")
 @click.option("--port", default=None, type=int, help="Bind port.  Default: 8420.")
+@click.option("--workers", default=None, type=int, help="Number of worker processes.  Default: 1.")
 @click.option(
     "--policy-dir",
     default=None,
@@ -27,11 +28,26 @@ def server_cmd() -> None:
     default=False,
     help="Enable observe mode (log decisions but always allow).",
 )
+@click.option(
+    "--ssl-certfile",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to SSL certificate file for HTTPS.",
+)
+@click.option(
+    "--ssl-keyfile",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to SSL private key file for HTTPS.",
+)
 def server_start(
     host: str | None,
     port: int | None,
+    workers: int | None,
     policy_dir: str | None,
     observe: bool,
+    ssl_certfile: str | None,
+    ssl_keyfile: str | None,
 ) -> None:
     """Start the Vectimus governance server."""
     try:
@@ -51,25 +67,39 @@ def server_start(
         config.host = host
     if port is not None:
         config.port = port
+    if workers is not None:
+        config.workers = workers
     if policy_dir is not None:
         config.policy_dir = policy_dir
     if observe:
         config.observe = True
+    if ssl_certfile is not None:
+        config.ssl_certfile = ssl_certfile
+    if ssl_keyfile is not None:
+        config.ssl_keyfile = ssl_keyfile
 
-    if config.api_key is None:
+    if not config.resolve_api_keys():
         click.echo(
             "Warning: No API key configured. The /evaluate endpoint is unprotected.\n"
-            "Set VECTIMUS_API_KEY or add api_key to config.toml.",
+            "Set VECTIMUS_API_KEY or add api_keys to config.toml.",
             err=True,
         )
 
-    click.echo(f"Starting Vectimus server on {config.host}:{config.port}")
+    protocol = "https" if config.ssl_certfile else "http"
+    click.echo(f"Starting Vectimus server on {protocol}://{config.host}:{config.port}")
+    if config.workers > 1:
+        click.echo(f"Workers: {config.workers}")
 
     import uvicorn
 
-    uvicorn.run(
-        "vectimus.server.app:create_app",
-        factory=True,
-        host=config.host,
-        port=config.port,
-    )
+    uvicorn_kwargs: dict = {
+        "factory": True,
+        "host": config.host,
+        "port": config.port,
+        "workers": config.workers,
+    }
+    if config.ssl_certfile and config.ssl_keyfile:
+        uvicorn_kwargs["ssl_certfile"] = config.ssl_certfile
+        uvicorn_kwargs["ssl_keyfile"] = config.ssl_keyfile
+
+    uvicorn.run("vectimus.server.app:create_app", **uvicorn_kwargs)

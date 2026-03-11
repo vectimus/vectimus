@@ -248,6 +248,27 @@ class VectimusConfig:
             self._data["mcp"]["allowed_servers"] = allowed
             self._write()
 
+    # -- Server URL ----------------------------------------------------------
+
+    def get_server_url(self) -> str | None:
+        """Return the server URL.  Resolution: env > config > None."""
+        env = os.environ.get("VECTIMUS_SERVER_URL")
+        if env:
+            return env
+        return self._data.get("server", {}).get("url") or None
+
+    def set_server_url(self, url: str | None) -> None:
+        """Set or clear the server URL in config and write to disk."""
+        if url:
+            self._data.setdefault("server", {})
+            self._data["server"]["url"] = url
+        else:
+            server = self._data.get("server", {})
+            server.pop("url", None)
+            if not server:
+                self._data.pop("server", None)
+        self._write()
+
     # -- Observe mode --------------------------------------------------------
 
     def is_observe_mode(self) -> bool:

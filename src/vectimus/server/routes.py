@@ -1,23 +1,27 @@
 """HTTP route handlers for the Vectimus governance server.
 
 Endpoints:
-- POST /evaluate -- evaluate a tool action against policies
-- GET  /policies -- list loaded policies
-- GET  /health   -- server health check
-- GET  /events   -- SSE stream of evaluation events (stretch goal)
+- POST /evaluate  -- evaluate a tool action against policies
+- GET  /policies  -- list loaded policies
+- GET  /health    -- server health check (detailed)
+- GET  /healthz   -- k8s liveness probe (lightweight)
+- GET  /ready     -- k8s readiness probe (policies loaded?)
+- GET  /events    -- SSE stream of evaluation events
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import deque
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
+import vectimus
 from vectimus.core.evaluator import PolicyEngine
 from vectimus.core.models import AuditRecord, Decision, DecisionVerdict, VectimusEvent
 from vectimus.core.normaliser import normalise
@@ -28,10 +32,9 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 # In-memory ring buffer for the SSE /events stream.
+# Events are tagged with a monotonic counter to handle buffer wraparound.
 _EVENT_BUFFER: deque[dict[str, Any]] = deque(maxlen=1000)
-
-# Track server start time for /health uptime.
-_START_TIME = time.monotonic()
+_event_counter: int = 0
 
 
 @router.post("/evaluate")
@@ -41,7 +44,18 @@ async def evaluate(request: Request) -> dict[str, Any]:
     Accepts a raw tool event payload.  The ``X-Vectimus-Source`` header
     identifies which tool sent the request (defaults to ``claude-code``).
     """
-    body: dict[str, Any] = await request.json()
+    global _event_counter
+
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return _build_response(
+            Decision(
+                decision=DecisionVerdict.DENY,
+                reason="Invalid request body (fail closed)",
+            ),
+        )
+
     source = request.headers.get("X-Vectimus-Source", "claude-code")
     engine: PolicyEngine = request.app.state.engine
 
@@ -59,31 +73,39 @@ async def evaluate(request: Request) -> dict[str, Any]:
         )
 
     # Session-level enrichment: detect temporal flood patterns.
+    # Run in executor to avoid blocking the event loop with threading.Lock.
     session_store: SessionStore = request.app.state.session_store
-    _enrich_session(event, session_store)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _enrich_session, event, session_store)
 
-    decision = engine.evaluate(event)
+    # Run the blocking Cedar evaluation in a thread to avoid blocking
+    # the async event loop under concurrent load.
+    decision = await loop.run_in_executor(None, engine.evaluate, event)
 
     # Build audit record and buffer for SSE
     record = AuditRecord(event=event, decision=decision)
     _EVENT_BUFFER.append(record.model_dump())
+    _event_counter += 1
 
-    # Try to export the audit record
+    # Best-effort audit export using the cached exporter
     try:
-        from vectimus.exporters.jsonl import JsonlExporter
-
-        exporter = JsonlExporter()
+        exporter = request.app.state.exporter
         exporter.export(record)
     except Exception:
-        pass  # Best-effort; don't let export errors block the response.
+        pass  # Don't let export errors block the response.
 
-    logger.info(
-        "evaluation_complete",
-        decision=decision.decision,
-        action=event.action.action_type,
-        tool=event.action.raw_tool_name,
-        time_ms=decision.evaluation_time_ms,
-    )
+    # Include API key identity in log if available
+    log_extra: dict[str, Any] = {
+        "decision": decision.decision,
+        "action": event.action.action_type,
+        "tool": event.action.raw_tool_name,
+        "source": source,
+        "time_ms": decision.evaluation_time_ms,
+    }
+    api_key_name = getattr(request.state, "api_key_name", None)
+    if api_key_name:
+        log_extra["client"] = api_key_name
+    logger.info("evaluation_complete", **log_extra)
 
     return _build_response(
         decision,
@@ -103,14 +125,32 @@ async def list_policies(request: Request) -> dict[str, Any]:
 async def health(request: Request) -> dict[str, Any]:
     """Return server health including policy count and uptime."""
     engine: PolicyEngine = request.app.state.engine
-    policies = engine.list_policies()
-    uptime_seconds = round(time.monotonic() - _START_TIME, 1)
+    uptime_seconds = round(time.monotonic() - request.app.state.start_time, 1)
     return {
         "status": "healthy",
-        "version": "0.1.0",
-        "policy_count": len(policies),
+        "version": vectimus.__version__,
+        "policy_count": len(engine.list_policies()),
         "uptime_seconds": uptime_seconds,
     }
+
+
+@router.get("/healthz")
+async def healthz() -> JSONResponse:
+    """Lightweight liveness probe for k8s. Returns 200 if the process is alive."""
+    return JSONResponse({"status": "ok"})
+
+
+@router.get("/ready")
+async def ready(request: Request) -> JSONResponse:
+    """Readiness probe for k8s. Returns 200 only when policies are loaded."""
+    engine: PolicyEngine = request.app.state.engine
+    policy_count = len(engine.list_policies())
+    if policy_count > 0:
+        return JSONResponse({"status": "ready", "policy_count": policy_count})
+    return JSONResponse(
+        {"status": "not_ready", "reason": "no policies loaded"},
+        status_code=503,
+    )
 
 
 @router.get("/events")
@@ -118,15 +158,16 @@ async def events_stream() -> StreamingResponse:
     """Server-Sent Events stream of real-time evaluation events."""
 
     async def generate():  # type: ignore[return]
-        last_idx = len(_EVENT_BUFFER)
+        last_counter = _event_counter
         while True:
-            current_len = len(_EVENT_BUFFER)
-            if current_len > last_idx:
-                import json
-
-                for item in list(_EVENT_BUFFER)[last_idx:]:
+            current_counter = _event_counter
+            if current_counter > last_counter:
+                # Read the most recent (current_counter - last_counter) items.
+                new_count = min(current_counter - last_counter, len(_EVENT_BUFFER))
+                items = list(_EVENT_BUFFER)[-new_count:]
+                for item in items:
                     yield f"data: {json.dumps(item, default=str)}\n\n"
-                last_idx = current_len
+                last_counter = current_counter
             await asyncio.sleep(0.5)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -168,7 +209,12 @@ def _build_response(
 
     # Claude Code HTTP hooks expect hookSpecificOutput.
     if hook_event:
-        permission = "deny" if decision.decision == DecisionVerdict.DENY else "allow"
+        if decision.decision == DecisionVerdict.DENY:
+            permission = "deny"
+        elif decision.decision == DecisionVerdict.ESCALATE:
+            permission = "deny"  # fail closed until escalation is resolved
+        else:
+            permission = "allow"
         response["hookSpecificOutput"] = {
             "hookEventName": hook_event,
             "permissionDecision": permission,

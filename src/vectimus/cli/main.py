@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import click
 
+from vectimus.cli.hook_cmd import hook_cmd
 from vectimus.cli.init_cmd import init_cmd
 from vectimus.cli.pack_cmd import pack_cmd
 from vectimus.cli.remove_cmd import remove_cmd
@@ -113,6 +114,7 @@ def mcp_list() -> None:
         click.echo(f"  [+] {s}")
 
 
+cli.add_command(hook_cmd, name="hook")
 cli.add_command(init_cmd, name="init")
 cli.add_command(remove_cmd, name="remove")
 cli.add_command(test_cmd, name="test")

@@ -34,6 +34,11 @@ def _check_cursor() -> str | None:
         return None
     try:
         data = json.loads(path.read_text())
+        # New format: {"hooks": {"preToolUse": [...]}}
+        hooks = data.get("hooks", {})
+        if hooks.get("preToolUse") or hooks.get("beforeShellExecution"):
+            return str(path)
+        # Legacy flat format: {"beforeShellExecution": {...}}
         if data.get("beforeShellExecution"):
             return str(path)
     except (json.JSONDecodeError, OSError):
@@ -48,6 +53,11 @@ def _check_copilot() -> str | None:
         return None
     try:
         data = json.loads(path.read_text())
+        # New format: {"hooks": {"PreToolUse": [...]}}
+        hooks = data.get("hooks", {})
+        if hooks.get("PreToolUse"):
+            return str(path)
+        # Legacy flat format: {"PreToolUse": {...}}
         if data.get("PreToolUse"):
             return str(path)
     except (json.JSONDecodeError, OSError):

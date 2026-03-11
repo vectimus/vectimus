@@ -4,7 +4,7 @@ Deterministic governance for AI coding tools and autonomous agents.
 
 ## The problem
 
-AI coding agents execute shell commands, write files, install packages and call APIs with no guardrails.  The [Clinejection attack](docs/incidents/clinejection.md) in February 2026 compromised over 4,000 developers when a malicious MCP server instructed agents to publish backdoored npm packages.  A month earlier, an autonomous agent ran `terraform destroy` against a production environment because nothing stopped it.  Without governance, every agent is one prompt injection away from catastrophe.
+AI coding agents execute shell commands, write files, install packages and call APIs with no guardrails.  The Clinejection attack in February 2026 compromised over 4,000 developers when a malicious MCP server instructed agents to publish backdoored npm packages.  A month earlier, an autonomous agent ran `terraform destroy` against a production environment because nothing stopped it.  Without governance, every agent is one prompt injection away from catastrophe.
 
 ## What Vectimus does
 
@@ -122,7 +122,7 @@ Or via environment variable for CI/CD:
 export VECTIMUS_MCP_ALLOWED="github,slack,jira"
 ```
 
-Approved servers still go through input inspection rules that check for credential paths, CI/CD file tampering and dangerous commands in tool parameters.  See [Writing policies](docs/writing-policies.md) for details.
+Approved servers still go through input inspection rules that check for credential paths, CI/CD file tampering and dangerous commands in tool parameters.  See [Writing policies](https://vectimus.dev/docs/writing-policies) for details.
 
 ## Per-project rule overrides
 
@@ -143,10 +143,12 @@ Overrides are stored in `.vectimus/config.toml` in the project root.  The `.vect
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Writing policies](docs/writing-policies.md)
-- [Running a shared server](docs/server.md)
-- [Incident references](docs/incidents/)
+Full documentation is available at [vectimus.dev/docs](https://vectimus.dev/docs).
+
+- [Getting started](https://vectimus.dev/docs/getting-started)
+- [Writing policies](https://vectimus.dev/docs/writing-policies)
+- [Running a shared server](https://vectimus.dev/docs/server)
+- [Architecture](https://vectimus.dev/docs/architecture)
 
 ## Configuration
 
@@ -179,7 +181,12 @@ Or use environment variables:
 | `VECTIMUS_LOG_DIR` | Audit log directory |
 | `VECTIMUS_OBSERVE` | Set to `true` for observe mode |
 | `VECTIMUS_MCP_ALLOWED` | Comma-separated approved MCP servers |
-| `VECTIMUS_API_KEY` | API key for server authentication |
+| `VECTIMUS_API_KEY` | Single API key for server authentication |
+| `VECTIMUS_API_KEYS` | Named team keys (`name:key,name:key`) |
+| `VECTIMUS_WORKERS` | Server worker processes |
+| `VECTIMUS_SSL_CERTFILE` | TLS certificate file |
+| `VECTIMUS_SSL_KEYFILE` | TLS private key file |
+| `VECTIMUS_CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
 
 ## Contributing
 

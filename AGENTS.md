@@ -32,10 +32,9 @@ vectimus init                # Generate hook configs for detected AI tools
 ```
 src/vectimus/
   core/           # Evaluator, normaliser, models, Cedar schema, config, loader
-  shims/          # Command hook adapters (Claude Code, Cursor, Copilot)
   server/         # Optional FastAPI server (behind vectimus[server])
   exporters/      # Audit log exporters (JSONL with file locking)
-  cli/            # Click CLI commands (init, test, status, pack, rule, observe, mcp, server)
+  cli/            # Click CLI commands (init, hook, test, status, pack, rule, observe, mcp, server)
   policies/       # Cedar policy packs (base/, owasp-agentic/)
 tests/            # pytest tests
 docs/             # Documentation
@@ -45,6 +44,7 @@ docs/             # Documentation
 
 | Command | Purpose |
 |---------|---------|
+| `vectimus hook --source <tool>` | Unified hook entry point for Claude Code, Cursor, Copilot |
 | `vectimus init` | Detect tools, generate hook configs (merges with existing hooks) |
 | `vectimus remove` | Remove Vectimus hooks from detected tools in this project |
 | `vectimus test` | Test policies against sample events |
@@ -73,7 +73,7 @@ docs/             # Documentation
 
 ## Key design decisions
 
-**Fail closed.**  If Cedar evaluation errors, the decision is DENY.  Never default to allow on error.
+**Fail closed.**  This is the single most important invariant in the codebase.  Only an explicit ALLOW from the policy engine should result in exit code 0.  Everything else (DENY, ESCALATE, errors, unknown values) must result in exit code 2 (deny).  When adding new code paths that handle decisions, always check for the allow case explicitly and deny everything else.  Never check only for DENY and let other values fall through to allow.
 
 **Steer, don't just block.**  Every DENY must include a human-readable `reason` and a `suggested_alternative`.  A governance layer that only says "no" is a productivity killer.  One that says "not that way, try this instead" is a force multiplier.
 
@@ -89,7 +89,7 @@ docs/             # Documentation
 
 **No telemetry.**  The open-source version sends no data anywhere.
 
-**Escalation is simple (MVP).**  "Escalate" returns a denial with a reason stating the action requires human approval.  No Slack, no approval workflows.  Richer escalation is scoped for the enterprise tier.
+**Escalation is simple (MVP).**  ESCALATE is always denied at the hook level.  The hook returns exit code 2 with a reason stating the action requires human approval.  No Slack, no approval workflows yet.  In future the enterprise tier will support out-of-band approval (Slack, ServiceNow, PagerDuty) where the hook denies, the approval happens asynchronously and the developer retries after approval.  The invariant that must never change: ESCALATE produces a deny at the hook.  Approval never happens inline.
 
 ## Cedar policy conventions
 

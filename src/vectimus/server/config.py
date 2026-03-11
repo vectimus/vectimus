@@ -16,21 +16,52 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+class ApiKeyEntry(BaseModel):
+    """A named API key for authentication and audit attribution."""
+
+    name: str
+    key: str
+
+
 class ServerConfig(BaseModel):
     """Runtime configuration for the Vectimus server."""
 
     host: str = "127.0.0.1"
     port: int = 8420
+    workers: int = 1
     policy_dir: str | None = None
     log_dir: str = str(Path.home() / ".vectimus" / "logs")
     identity_resolver: str = "git"
     default_persona: str = "default"
-    api_key: str | None = None
     observe: bool = False
     session_spawn_limit: int = 10
     session_message_limit: int = 50
     session_ttl_seconds: int = 3600
     mcp_allowed_servers: list[str] = []
+
+    # Auth: single key (backward compat) or named keys for team use
+    api_key: str | None = None
+    api_keys: list[ApiKeyEntry] = []
+
+    # TLS
+    ssl_certfile: str | None = None
+    ssl_keyfile: str | None = None
+
+    # CORS
+    cors_origins: list[str] = []
+
+    def resolve_api_keys(self) -> dict[str, str]:
+        """Build a lookup of key -> name for auth middleware.
+
+        Merges the legacy single ``api_key`` with the ``api_keys`` list.
+        Returns an empty dict when no keys are configured (open access).
+        """
+        lookup: dict[str, str] = {}
+        for entry in self.api_keys:
+            lookup[entry.key] = entry.name
+        if self.api_key and self.api_key not in lookup:
+            lookup[self.api_key] = "default"
+        return lookup
 
     @classmethod
     def load(cls) -> ServerConfig:
@@ -67,6 +98,20 @@ class ServerConfig(BaseModel):
             if "allowed_servers" in data["mcp"]:
                 flat["mcp_allowed_servers"] = list(data["mcp"]["allowed_servers"])
 
+        # Named API keys from TOML: [[server.api_keys]]
+        if "api_keys" in flat:
+            raw_keys = flat.pop("api_keys")
+            if isinstance(raw_keys, list):
+                flat["api_keys"] = [
+                    ApiKeyEntry(name=k.get("name", "unnamed"), key=k["key"])
+                    for k in raw_keys
+                    if isinstance(k, dict) and "key" in k
+                ]
+
+        # CORS origins from TOML
+        if "cors_origins" in flat and isinstance(flat["cors_origins"], list):
+            flat["cors_origins"] = [str(o) for o in flat["cors_origins"]]
+
         # Environment overrides
         env_map = {
             "VECTIMUS_HOST": "host",
@@ -74,11 +119,14 @@ class ServerConfig(BaseModel):
             "VECTIMUS_POLICY_DIR": "policy_dir",
             "VECTIMUS_LOG_DIR": "log_dir",
             "VECTIMUS_API_KEY": "api_key",
+            "VECTIMUS_SSL_CERTFILE": "ssl_certfile",
+            "VECTIMUS_SSL_KEYFILE": "ssl_keyfile",
         }
         int_env_map = {
             "VECTIMUS_SESSION_SPAWN_LIMIT": "session_spawn_limit",
             "VECTIMUS_SESSION_MESSAGE_LIMIT": "session_message_limit",
             "VECTIMUS_SESSION_TTL": "session_ttl_seconds",
+            "VECTIMUS_WORKERS": "workers",
         }
         for env_key, config_key in env_map.items():
             val = os.environ.get(env_key)
@@ -98,6 +146,20 @@ class ServerConfig(BaseModel):
                 except (TypeError, ValueError):
                     pass  # Keep default
 
+        # Named API keys from env: VECTIMUS_API_KEYS=name1:key1,name2:key2
+        api_keys_env = os.environ.get("VECTIMUS_API_KEYS", "").strip()
+        if api_keys_env:
+            env_keys: list[ApiKeyEntry] = []
+            for pair in api_keys_env.split(","):
+                pair = pair.strip()
+                if ":" in pair:
+                    name, key = pair.split(":", 1)
+                    if key.strip():
+                        env_keys.append(ApiKeyEntry(name=name.strip(), key=key.strip()))
+            if env_keys:
+                existing = flat.get("api_keys", [])
+                flat["api_keys"] = existing + env_keys
+
         # MCP allowed servers from env (merges with TOML)
         mcp_env = os.environ.get("VECTIMUS_MCP_ALLOWED", "").strip()
         if mcp_env:
@@ -109,6 +171,13 @@ class ServerConfig(BaseModel):
                     existing.append(s)
                     seen.add(s)
             flat["mcp_allowed_servers"] = existing
+
+        # CORS origins from env (merges with TOML)
+        cors_env = os.environ.get("VECTIMUS_CORS_ORIGINS", "").strip()
+        if cors_env:
+            env_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+            existing_origins = flat.get("cors_origins", [])
+            flat["cors_origins"] = list(set(existing_origins + env_origins))
 
         # Observe mode from env
         observe_val = os.environ.get("VECTIMUS_OBSERVE", "").lower()

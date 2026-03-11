@@ -66,13 +66,16 @@ def remove_cmd(force: bool) -> None:
     if not force:
         click.confirm("\nRemove these hooks?", abort=True)
 
+    remove_dispatch = {
+        "Claude Code": _remove_claude_code,
+        "Cursor": _remove_cursor,
+        "VS Code / Copilot": _remove_copilot,
+    }
+
     for display_name, path in removals:
-        if "claude" in str(path).lower():
-            _remove_claude_code(path)
-        elif "cursor" in str(path).lower():
-            _remove_cursor(path)
-        elif "copilot" in str(path).lower() or "vectimus.json" in str(path):
-            _remove_copilot(path)
+        handler = remove_dispatch.get(display_name)
+        if handler:
+            handler(path)
         click.echo(f"  [-] {display_name:<18} hooks removed")
 
     click.echo(f"\nRemoved Vectimus from {len(removals)} tool(s).")
