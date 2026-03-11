@@ -28,6 +28,7 @@ class RuleInfo:
     incident: str = ""
     suggested_alternative: str = ""
     controls: str = ""
+    enforcement: str = "deny"
     pack_name: str = ""
     source_file: str = ""
     cedar_text: str = ""
@@ -100,6 +101,11 @@ def parse_rules_from_cedar(
         if not rule_id:
             continue
 
+        raw_enforcement = annotations.get("enforcement", "deny")
+        enforcement = (
+            raw_enforcement if raw_enforcement in ("deny", "escalate", "observe") else "deny"
+        )
+
         rules.append(
             RuleInfo(
                 rule_id=rule_id,
@@ -107,6 +113,7 @@ def parse_rules_from_cedar(
                 incident=annotations.get("incident", ""),
                 suggested_alternative=annotations.get("suggested_alternative", ""),
                 controls=annotations.get("controls", ""),
+                enforcement=enforcement,
                 pack_name=pack_name,
                 source_file=source_file,
                 cedar_text=block.strip(),
@@ -243,6 +250,10 @@ class PolicyLoader:
             builtin = Path(__file__).resolve().parent.parent / "policies"
             external = Path.home() / ".vectimus" / "packs"
             self._policy_dirs = [builtin, external]
+            if project_path is not None:
+                project_packs = project_path / ".vectimus" / "packs"
+                if project_packs.is_dir():
+                    self._policy_dirs.append(project_packs)
         else:
             self._policy_dirs = [Path(d) for d in policy_dirs]
 
@@ -397,6 +408,7 @@ class PolicyLoader:
                 "incident": r.incident,
                 "suggested_alternative": r.suggested_alternative,
                 "controls": r.controls,
+                "enforcement": r.enforcement,
                 "source_file": r.source_file,
                 "enabled": r.enabled,
             }

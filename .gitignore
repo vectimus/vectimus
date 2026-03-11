@@ -13,3 +13,5 @@ build/
 .claude/
 .cursor/
 docs/plans/
+.env
+.vectimus/

@@ -28,9 +28,10 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
         click.echo("No rules found.")
         return
 
-    # Determine per-project disabled rules for display.
+    # Determine per-project disabled rules and enforcement overrides.
     project_disabled = loader.config.load_project_overrides(project_path)
     global_disabled = set(loader.config.disabled_rules())
+    enforcement_overrides = loader.config.effective_enforcement_overrides(project_path)
 
     click.echo(f"{'ID':<25} {'Pack':<15} {'Description':<40} {'Status':<22}")
     click.echo("-" * 105)
@@ -48,7 +49,14 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
         elif not r["enabled"]:
             status = "disabled"
         else:
-            status = "enabled"
+            # Show enforcement level if not the default "deny".
+            effective = enforcement_overrides.get(rid, r.get("enforcement", "deny"))
+            if effective == "escalate":
+                status = "enabled (escalate)"
+            elif effective == "observe":
+                status = "enabled (observe)"
+            else:
+                status = "enabled"
         click.echo(f"{rid:<25} {r['pack']:<15} {desc:<40} {status}")
 
 
@@ -71,7 +79,7 @@ def rule_disable(
     With --global, disables the rule in the global config.
     """
     dirs = [policy_dir] if policy_dir else None
-    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path)
+    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path, project_path=Path.cwd())
 
     rule = loader.get_rule(rule_id)
     if rule is None:
@@ -114,7 +122,7 @@ def rule_enable(
     With --global, re-enables the rule in the global config.
     """
     dirs = [policy_dir] if policy_dir else None
-    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path)
+    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path, project_path=Path.cwd())
 
     rule = loader.get_rule(rule_id)
     if rule is None:
@@ -146,7 +154,8 @@ def rule_enable(
 def rule_show(rule_id: str, config_path: str | None, policy_dir: str | None) -> None:
     """Show full details for a rule including Cedar policy text."""
     dirs = [policy_dir] if policy_dir else None
-    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path)
+    project_path = Path.cwd()
+    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path, project_path=project_path)
 
     rule = loader.get_rule(rule_id)
     if rule is None:
@@ -156,6 +165,15 @@ def rule_show(rule_id: str, config_path: str | None, policy_dir: str | None) -> 
     click.echo(f"Rule:        {rule.rule_id}")
     click.echo(f"Pack:        {rule.pack_name}")
     click.echo(f"Status:      {'enabled' if rule.enabled else 'disabled (user override)'}")
+
+    # Show effective enforcement level with override source.
+    config_override = loader.config.get_enforcement_override(rule_id, project_path)
+    annotation_level = rule.enforcement
+    if config_override:
+        click.echo(f"Enforcement: {config_override} (overridden from {annotation_level})")
+    else:
+        click.echo(f"Enforcement: {annotation_level}")
+
     click.echo(f"Description: {rule.description}")
     if rule.incident:
         click.echo(f"Incident:    {rule.incident}")
@@ -167,6 +185,57 @@ def rule_show(rule_id: str, config_path: str | None, policy_dir: str | None) -> 
     click.echo()
     click.echo("Cedar policy:")
     click.echo(rule.cedar_text)
+
+
+@rule_cmd.command("enforce")
+@click.argument("rule_id")
+@click.option(
+    "--level",
+    required=False,
+    type=click.Choice(["deny", "escalate", "observe"], case_sensitive=False),
+    help="Enforcement level: deny (hard block), escalate (ask user), observe (log only).",
+)
+@click.option("--config", "config_path", default=None, help="Path to config.toml.")
+@click.option("--policy-dir", default=None, help="Policy directory to scan.")
+@click.option("--global", "is_global", is_flag=True, help="Apply globally instead of per-project.")
+@click.option("--clear", is_flag=True, help="Remove the enforcement override.")
+def rule_enforce(
+    rule_id: str,
+    level: str | None,
+    config_path: str | None,
+    policy_dir: str | None,
+    is_global: bool,
+    clear: bool,
+) -> None:
+    """Override the enforcement level for a rule.
+
+    Changes how a matched rule responds: deny (hard block),
+    escalate (ask the user) or observe (log only, allow through).
+    Use --clear to remove the override and revert to the policy annotation.
+    """
+    dirs = [policy_dir] if policy_dir else None
+    project_path = Path.cwd() if not is_global else None
+    loader = PolicyLoader(policy_dirs=dirs, config_path=config_path, project_path=project_path)
+
+    the_rule = loader.get_rule(rule_id)
+    if the_rule is None:
+        click.echo(f"Rule '{rule_id}' not found.", err=True)
+        raise SystemExit(1)
+
+    if clear:
+        loader.config.clear_enforcement_override(rule_id, project_path)
+        scope = "globally" if is_global else f"for {project_path}"
+        click.echo(f"Enforcement override cleared {scope} for '{rule_id}'.")
+        click.echo(f"Effective level: {the_rule.enforcement} (from policy annotation)")
+        return
+
+    if level is None:
+        click.echo("Either --level or --clear is required.", err=True)
+        raise SystemExit(1)
+
+    loader.config.set_enforcement_override(rule_id, level, project_path)
+    scope = "globally" if is_global else f"for {project_path}"
+    click.echo(f"Rule '{rule_id}' enforcement set to '{level}' {scope}.")
 
 
 @rule_cmd.command("overrides")

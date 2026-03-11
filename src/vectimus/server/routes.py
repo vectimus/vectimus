@@ -212,7 +212,7 @@ def _build_response(
         if decision.decision == DecisionVerdict.DENY:
             permission = "deny"
         elif decision.decision == DecisionVerdict.ESCALATE:
-            permission = "deny"  # fail closed until escalation is resolved
+            permission = "ask"
         else:
             permission = "allow"
         response["hookSpecificOutput"] = {
