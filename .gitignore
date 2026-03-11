@@ -14,3 +14,4 @@ build/
 .cursor/
 docs/plans/
 .env
+.vectimus/
