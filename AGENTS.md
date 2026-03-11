@@ -32,10 +32,9 @@ vectimus init                # Generate hook configs for detected AI tools
 ```
 src/vectimus/
   core/           # Evaluator, normaliser, models, Cedar schema, config, loader
-  shims/          # Command hook adapters (Claude Code, Cursor, Copilot)
   server/         # Optional FastAPI server (behind vectimus[server])
   exporters/      # Audit log exporters (JSONL with file locking)
-  cli/            # Click CLI commands (init, test, status, pack, rule, observe, mcp, server)
+  cli/            # Click CLI commands (init, hook, test, status, pack, rule, observe, mcp, server)
   policies/       # Cedar policy packs (base/, owasp-agentic/)
 tests/            # pytest tests
 docs/             # Documentation
@@ -45,6 +44,7 @@ docs/             # Documentation
 
 | Command | Purpose |
 |---------|---------|
+| `vectimus hook --source <tool>` | Unified hook entry point for Claude Code, Cursor, Copilot |
 | `vectimus init` | Detect tools, generate hook configs (merges with existing hooks) |
 | `vectimus remove` | Remove Vectimus hooks from detected tools in this project |
 | `vectimus test` | Test policies against sample events |

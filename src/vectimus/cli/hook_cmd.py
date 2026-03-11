@@ -24,7 +24,7 @@ from vectimus.core.evaluator import PolicyEngine
 from vectimus.core.loader import PolicyLoader
 from vectimus.core.models import DecisionVerdict
 from vectimus.core.normaliser import normalise
-from vectimus.shims import write_audit
+from vectimus.core.audit import write_audit
 
 VALID_SOURCES = ("claude-code", "cursor", "copilot")
 
