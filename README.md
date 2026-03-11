@@ -1,6 +1,6 @@
 # Vectimus
 
-Deterministic governance for AI coding tools and autonomous agents.
+Deterministic governance for AI coding agents. Cedar policies. Under 5ms. Apache 2.0.
 
 ## The problem
 
@@ -26,7 +26,7 @@ Vectimus intercepts every action an AI agent takes and evaluates it against [Ced
 
 ## Quick start
 
-Two commands. 81 rules active out of the box.
+Two commands. 78 policies with 368 rules active out of the box.
 
 ```bash
 pipx install vectimus
@@ -41,6 +41,12 @@ vectimus init
 ```
 
 That's it. Your agents are now governed. Dangerous commands, secret access, infrastructure changes and supply chain attacks are blocked before execution.
+
+Verify your setup:
+
+```bash
+vectimus test
+```
 
 ## Observe mode
 
@@ -78,7 +84,7 @@ This strips Vectimus entries from your tool configs while preserving any non-Vec
 @id("vectimus-base-015")
 @description("Block npm publish to prevent supply-chain attacks")
 @incident("Clinejection: malicious npm packages published by compromised AI agent, February 2026")
-@controls("SLSA-L2")
+@controls("SLSA-L2, ASI02-01, CC8.1-01")
 forbid (
     principal,
     action == Vectimus::Action::"package_operation",
@@ -122,7 +128,7 @@ Or via environment variable for CI/CD:
 export VECTIMUS_MCP_ALLOWED="github,slack,jira"
 ```
 
-Approved servers still go through input inspection rules that check for credential paths, CI/CD file tampering and dangerous commands in tool parameters.  See [Writing policies](https://vectimus.dev/docs/writing-policies) for details.
+Approved servers still go through input inspection rules that check for credential paths, CI/CD file tampering and dangerous commands in tool parameters.  See [Writing policies](https://vectimus.com/docs/writing-policies) for details.
 
 ## Per-project rule overrides
 
@@ -143,16 +149,16 @@ Overrides are stored in `.vectimus/config.toml` in the project root.  The `.vect
 
 ## Documentation
 
-Full documentation is available at [vectimus.dev/docs](https://vectimus.dev/docs).
+Full documentation is available at [vectimus.com/docs](https://vectimus.com/docs).
 
-- [Getting started](https://vectimus.dev/docs/getting-started)
-- [Writing policies](https://vectimus.dev/docs/writing-policies)
-- [Running a shared server](https://vectimus.dev/docs/server)
-- [Architecture](https://vectimus.dev/docs/architecture)
+- [Getting started](https://vectimus.com/docs/getting-started)
+- [Writing policies](https://vectimus.com/docs/writing-policies)
+- [Running a shared server](https://vectimus.com/docs/server)
+- [Architecture](https://vectimus.com/docs/architecture)
 
 ## Configuration
 
-Create a `vectimus.toml` in your project root:
+Create `.vectimus/config.toml` in your project root:
 
 ```toml
 [policies]
