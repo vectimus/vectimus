@@ -12,6 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import deque
 from typing import Any
@@ -31,10 +32,9 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 # In-memory ring buffer for the SSE /events stream.
+# Events are tagged with a monotonic counter to handle buffer wraparound.
 _EVENT_BUFFER: deque[dict[str, Any]] = deque(maxlen=1000)
-
-# Track server start time for /health uptime.
-_START_TIME = time.monotonic()
+_event_counter: int = 0
 
 
 @router.post("/evaluate")
@@ -44,7 +44,18 @@ async def evaluate(request: Request) -> dict[str, Any]:
     Accepts a raw tool event payload.  The ``X-Vectimus-Source`` header
     identifies which tool sent the request (defaults to ``claude-code``).
     """
-    body: dict[str, Any] = await request.json()
+    global _event_counter
+
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return _build_response(
+            Decision(
+                decision=DecisionVerdict.DENY,
+                reason="Invalid request body (fail closed)",
+            ),
+        )
+
     source = request.headers.get("X-Vectimus-Source", "claude-code")
     engine: PolicyEngine = request.app.state.engine
 
@@ -62,17 +73,19 @@ async def evaluate(request: Request) -> dict[str, Any]:
         )
 
     # Session-level enrichment: detect temporal flood patterns.
+    # Run in executor to avoid blocking the event loop with threading.Lock.
     session_store: SessionStore = request.app.state.session_store
-    _enrich_session(event, session_store)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _enrich_session, event, session_store)
 
     # Run the blocking Cedar evaluation in a thread to avoid blocking
     # the async event loop under concurrent load.
-    loop = asyncio.get_running_loop()
     decision = await loop.run_in_executor(None, engine.evaluate, event)
 
     # Build audit record and buffer for SSE
     record = AuditRecord(event=event, decision=decision)
     _EVENT_BUFFER.append(record.model_dump())
+    _event_counter += 1
 
     # Best-effort audit export using the cached exporter
     try:
@@ -112,7 +125,7 @@ async def list_policies(request: Request) -> dict[str, Any]:
 async def health(request: Request) -> dict[str, Any]:
     """Return server health including policy count and uptime."""
     engine: PolicyEngine = request.app.state.engine
-    uptime_seconds = round(time.monotonic() - _START_TIME, 1)
+    uptime_seconds = round(time.monotonic() - request.app.state.start_time, 1)
     return {
         "status": "healthy",
         "version": vectimus.__version__,
@@ -145,15 +158,16 @@ async def events_stream() -> StreamingResponse:
     """Server-Sent Events stream of real-time evaluation events."""
 
     async def generate():  # type: ignore[return]
-        last_idx = len(_EVENT_BUFFER)
+        last_counter = _event_counter
         while True:
-            current_len = len(_EVENT_BUFFER)
-            if current_len > last_idx:
-                import json
-
-                for item in list(_EVENT_BUFFER)[last_idx:]:
+            current_counter = _event_counter
+            if current_counter > last_counter:
+                # Read the most recent (current_counter - last_counter) items.
+                new_count = min(current_counter - last_counter, len(_EVENT_BUFFER))
+                items = list(_EVENT_BUFFER)[-new_count:]
+                for item in items:
                     yield f"data: {json.dumps(item, default=str)}\n\n"
-                last_idx = current_len
+                last_counter = current_counter
             await asyncio.sleep(0.5)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -195,7 +209,12 @@ def _build_response(
 
     # Claude Code HTTP hooks expect hookSpecificOutput.
     if hook_event:
-        permission = "deny" if decision.decision == DecisionVerdict.DENY else "allow"
+        if decision.decision == DecisionVerdict.DENY:
+            permission = "deny"
+        elif decision.decision == DecisionVerdict.ESCALATE:
+            permission = "deny"  # fail closed until escalation is resolved
+        else:
+            permission = "allow"
         response["hookSpecificOutput"] = {
             "hookEventName": hook_event,
             "permissionDecision": permission,

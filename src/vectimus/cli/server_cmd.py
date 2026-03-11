@@ -93,14 +93,11 @@ def server_start(
     import uvicorn
 
     uvicorn_kwargs: dict = {
+        "factory": True,
         "host": config.host,
         "port": config.port,
         "workers": config.workers,
     }
-    # uvicorn does not allow --factory with --workers > 1;
-    # multi-worker mode resolves the import string directly.
-    if config.workers <= 1:
-        uvicorn_kwargs["factory"] = True
     if config.ssl_certfile and config.ssl_keyfile:
         uvicorn_kwargs["ssl_certfile"] = config.ssl_certfile
         uvicorn_kwargs["ssl_keyfile"] = config.ssl_keyfile

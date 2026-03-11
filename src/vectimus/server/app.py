@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import time
 from contextlib import asynccontextmanager
 
 import structlog
@@ -25,6 +26,7 @@ _AUTH_EXEMPT_PATHS = {"/health", "/healthz", "/ready"}
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
     """Startup/shutdown lifecycle for the application."""
+    app.state.start_time = time.monotonic()
     logger.info("server_starting", version=vectimus.__version__)
     yield
     logger.info("server_shutting_down")
@@ -74,6 +76,9 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     # Single exporter instance shared across all requests
     app.state.exporter = JsonlExporter(log_dir=config.log_dir)
+
+    # Set start_time here as fallback; lifespan will override it.
+    app.state.start_time = time.monotonic()
 
     # API key middleware: supports both single key and named keys.
     # Probe endpoints (/health, /healthz, /ready) are always exempt.

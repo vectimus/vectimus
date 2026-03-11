@@ -84,14 +84,35 @@ _PKG_PREFIXES = ("npm", "pip", "cargo", "yarn", "pnpm", "bun")
 _GIT_PREFIX = "git"
 
 
+_SHELL_WRAPPERS = ("sudo", "env", "nohup", "nice", "time", "exec", "command")
+
+
 def _refine_shell_action(command: str) -> str:
     """Detect infrastructure, package and git commands inside shell invocations."""
     stripped = command.strip()
-    # Handle sudo prefix
-    if stripped.startswith("sudo "):
-        stripped = stripped[5:].strip()
+
+    # Strip common wrapper prefixes (sudo, env, nohup, nice, etc.)
+    changed = True
+    while changed:
+        changed = False
+        for wrapper in _SHELL_WRAPPERS:
+            if stripped.startswith(wrapper + " "):
+                stripped = stripped[len(wrapper) :].strip()
+                # For `env`, skip flags (-i, -u) and VAR=val assignments.
+                if wrapper == "env":
+                    while stripped:
+                        token = stripped.split(None, 1)[0] if stripped else ""
+                        if token.startswith("-") or "=" in token:
+                            stripped = stripped.split(None, 1)[1] if " " in stripped else ""
+                        else:
+                            break
+                changed = True
 
     first_word = stripped.split()[0] if stripped.split() else ""
+
+    # Strip absolute path to get the binary name (e.g. /usr/bin/npm -> npm).
+    if "/" in first_word:
+        first_word = first_word.rsplit("/", 1)[-1]
 
     if first_word in _INFRA_PREFIXES or first_word.startswith("kubectl"):
         return ActionType.INFRASTRUCTURE
@@ -184,7 +205,11 @@ except (TypeError, ValueError):
     _CONTENT_INSPECTION_MAX_LINES = 5000
 
 # Patterns that indicate script execution: interpreter + file path argument.
-_SCRIPT_EXEC_RE = re.compile(r"^(?:sudo\s+)?(?:bash|sh|zsh|python3?|node|ruby|perl)\s+(\S+)")
+_SCRIPT_EXEC_RE = re.compile(
+    r"^(?:sudo\s+)?(?:bash|sh|zsh|python3?|node|ruby|perl)"
+    r"(?:\s+(?:-\w+|--\w[\w-]*))*"  # skip flags like --norc, -e, -c
+    r"\s+(\S+)"
+)
 _DOTSLASH_RE = re.compile(r"^(\./\S+)")
 
 
@@ -299,7 +324,7 @@ def _normalise_claude_code(payload: dict[str, Any]) -> VectimusEvent:
     command = _extract_command(tool_input)
 
     # Build synthetic commands for agent operations
-    if action_type == ActionType.AGENT_SPAWN and tool_name in ("Agent", "TeamCreate"):
+    if action_type == ActionType.AGENT_SPAWN and tool_name in ("Agent", "Task", "TeamCreate"):
         command = _build_agent_spawn_command(tool_name, tool_input)
     elif action_type == ActionType.AGENT_MESSAGE:
         command = _build_agent_message_command(tool_input)
@@ -393,11 +418,22 @@ def _normalise_cursor(payload: dict[str, Any]) -> VectimusEvent:
         # Legacy per-event hooks (beforeShellExecution, afterFileEdit, etc.).
         action_type = CURSOR_EVENT_MAP.get(hook_event, ActionType.SHELL_COMMAND)
         command = payload.get("command")
-        file_path = payload.get("file_path")
+        file_path = _extract_file_path(payload)
         raw_tool = hook_event
 
     if action_type == ActionType.SHELL_COMMAND and command:
         action_type = _refine_shell_action(command)
+
+    # MCP fields — extract server/tool from mcp__server__tool naming convention.
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
+    if raw_tool.startswith("mcp__"):
+        parts = raw_tool.split("__", 2)
+        if len(parts) >= 3:
+            mcp_server = parts[1]
+            mcp_tool = parts[2]
+        elif len(parts) == 2:
+            mcp_server = parts[1]
 
     cwd = payload.get("cwd")
     workspace_roots: list[str] = payload.get("workspace_roots", [])
@@ -409,7 +445,7 @@ def _normalise_cursor(payload: dict[str, Any]) -> VectimusEvent:
     effective_input = tool_input if tool_name else payload
     if action_type == ActionType.FILE_WRITE:
         file_content = _extract_file_content(effective_input)
-    if command:
+    elif action_type == ActionType.SHELL_COMMAND and command:
         script_content = _resolve_script_content(command, cwd)
 
     return VectimusEvent(
@@ -428,6 +464,8 @@ def _normalise_cursor(payload: dict[str, Any]) -> VectimusEvent:
             raw_tool_name=raw_tool,
             command=command,
             file_path=file_path,
+            mcp_server=mcp_server,
+            mcp_tool=mcp_tool,
             file_content=file_content,
             script_content=script_content,
             raw_input=effective_input,
@@ -487,13 +525,24 @@ def _normalise_copilot(payload: dict[str, Any]) -> VectimusEvent:
     if action_type == ActionType.SHELL_COMMAND and command:
         action_type = _refine_shell_action(command)
 
+    # MCP fields — extract server/tool from mcp__server__tool naming convention.
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
+    if tool_name.startswith("mcp__"):
+        parts = tool_name.split("__", 2)
+        if len(parts) >= 3:
+            mcp_server = parts[1]
+            mcp_tool = parts[2]
+        elif len(parts) == 2:
+            mcp_server = parts[1]
+
     # Content inspection: extract file/script content for double evaluation.
     cwd = payload.get("cwd")
     file_content: str | None = None
     script_content: str | None = None
     if action_type == ActionType.FILE_WRITE:
         file_content = _extract_file_content(tool_input)
-    if command:
+    elif action_type == ActionType.SHELL_COMMAND and command:
         script_content = _resolve_script_content(command, cwd)
 
     return VectimusEvent(
@@ -513,6 +562,8 @@ def _normalise_copilot(payload: dict[str, Any]) -> VectimusEvent:
             command=command,
             file_path=_extract_file_path(tool_input),
             url=_extract_url(tool_input),
+            mcp_server=mcp_server,
+            mcp_tool=mcp_tool,
             file_content=file_content,
             script_content=script_content,
             raw_input=tool_input,
