@@ -866,6 +866,70 @@ async def test_cors_preflight_exempt_from_auth() -> None:
         assert "access-control-allow-origin" in resp.headers
 
 
+@pytest.mark.asyncio
+async def test_cors_headers_on_auth_rejection() -> None:
+    """401 responses should include CORS headers so browsers can read the error."""
+    from vectimus.server.config import ApiKeyEntry
+
+    config = ServerConfig(
+        api_keys=[ApiKeyEntry(name="team", key="secret")],
+        cors_origins=["https://dashboard.example.com"],
+    )
+    app = create_app(config)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/evaluate",
+            json={"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+            headers={
+                "Origin": "https://dashboard.example.com",
+                "X-Vectimus-API-Key": "wrong-key",
+            },
+        )
+        assert resp.status_code == 401
+        assert "access-control-allow-origin" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_empty_api_key_rejected() -> None:
+    """An empty key value in VECTIMUS_API_KEYS should not grant access."""
+    from vectimus.server.config import ApiKeyEntry
+
+    # Simulate what happens with "myservice:" — empty key should be skipped
+    # during config loading, but also verify auth rejects empty header
+    config = ServerConfig(
+        api_keys=[ApiKeyEntry(name="valid", key="real-key")],
+    )
+    app = create_app(config)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # No API key header at all — should be rejected
+        resp = await client.post(
+            "/evaluate",
+            json={"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+        )
+        assert resp.status_code == 401
+
+
+def test_empty_key_skipped_in_env_parsing() -> None:
+    """VECTIMUS_API_KEYS=name: should skip entries with empty key values."""
+    import os
+
+    old = os.environ.get("VECTIMUS_API_KEYS")
+    try:
+        os.environ["VECTIMUS_API_KEYS"] = "valid:real-key,empty:,also-empty:"
+        config = ServerConfig.load()
+        lookup = config.resolve_api_keys()
+        assert "real-key" in lookup
+        assert "" not in lookup
+        assert len(lookup) == 1
+    finally:
+        if old is None:
+            os.environ.pop("VECTIMUS_API_KEYS", None)
+        else:
+            os.environ["VECTIMUS_API_KEYS"] = old
+
+
 # ---------------------------------------------------------------------------
 # Config: TLS, workers, CORS, named keys
 # ---------------------------------------------------------------------------

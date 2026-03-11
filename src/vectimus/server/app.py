@@ -75,17 +75,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # Single exporter instance shared across all requests
     app.state.exporter = JsonlExporter(log_dir=config.log_dir)
 
-    # CORS middleware (only when origins are configured)
-    if config.cors_origins:
-        from fastapi.middleware.cors import CORSMiddleware
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=config.cors_origins,
-            allow_methods=["GET", "POST"],
-            allow_headers=["X-Vectimus-Source", "X-Vectimus-API-Key", "Content-Type"],
-        )
-
     # API key middleware: supports both single key and named keys.
     # Probe endpoints (/health, /healthz, /ready) are always exempt.
     api_key_lookup = config.resolve_api_keys()
@@ -114,6 +103,19 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             # Stash identity for structured logging in routes
             request.state.api_key_name = matched_name
             return await call_next(request)
+
+    # CORS middleware registered after auth so it wraps all responses
+    # (including 401s) with Access-Control-Allow-Origin headers.
+    # Starlette middleware is LIFO: last added = outermost = runs first.
+    if config.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.cors_origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["X-Vectimus-Source", "X-Vectimus-API-Key", "Content-Type"],
+        )
 
     # Register routes
     from vectimus.server.routes import router  # noqa: E402

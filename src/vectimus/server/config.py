@@ -154,7 +154,8 @@ class ServerConfig(BaseModel):
                 pair = pair.strip()
                 if ":" in pair:
                     name, key = pair.split(":", 1)
-                    env_keys.append(ApiKeyEntry(name=name.strip(), key=key.strip()))
+                    if key.strip():
+                        env_keys.append(ApiKeyEntry(name=name.strip(), key=key.strip()))
             if env_keys:
                 existing = flat.get("api_keys", [])
                 flat["api_keys"] = existing + env_keys
