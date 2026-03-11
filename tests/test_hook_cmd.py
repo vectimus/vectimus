@@ -280,6 +280,87 @@ class TestEscalateFailsClosed:
         assert exit_code == 2, "ESCALATE from server must produce exit code 2 (deny)"
         assert "deny" in output.lower()
 
+    def test_server_mode_cursor_gets_cursor_format(self, tmp_path, monkeypatch) -> None:
+        """Server mode must return Cursor-format deny, not Claude Code format.
+
+        The server always generates hookSpecificOutput in Claude Code format.
+        The hook client must ignore it for non-Claude-Code sources and build
+        the correct tool-specific output instead.
+        """
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import DecisionVerdict
+
+        server_response = {
+            "decision": DecisionVerdict.DENY,
+            "reason": "Blocked by policy",
+            # Server always generates Claude Code format hookSpecificOutput
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Blocked by policy",
+            },
+        }
+        payload = {
+            "command": "rm -rf /",
+            "hook_event_name": "beforeShellExecution",
+            "cwd": str(tmp_path),
+        }
+        with (
+            patch(
+                "vectimus.core.config.VectimusConfig.get_server_url",
+                return_value="http://localhost:8080",
+            ),
+            patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),
+        ):
+            exit_code, output = _run_hook("cursor", payload)
+
+        assert exit_code == 2
+        result = self._extract_json(output)
+        # Must be Cursor format, NOT Claude Code format
+        assert result["permission"] == "deny", "Cursor must get Cursor-format deny"
+        assert "user_message" in result
+        assert "agent_message" in result
+        assert "permissionDecision" not in result
+
+    def test_server_mode_claude_code_uses_hook_specific_output(self, tmp_path, monkeypatch) -> None:
+        """Server hookSpecificOutput should be used for Claude Code source."""
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import DecisionVerdict
+
+        server_response = {
+            "decision": DecisionVerdict.DENY,
+            "reason": "Blocked by policy",
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Custom server reason",
+            },
+        }
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        with (
+            patch(
+                "vectimus.core.config.VectimusConfig.get_server_url",
+                return_value="http://localhost:8080",
+            ),
+            patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),
+        ):
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 2
+        result = self._extract_json(output)
+        # Claude Code should use the server's hookSpecificOutput directly
+        assert result["permissionDecision"] == "deny"
+        assert result["permissionDecisionReason"] == "Custom server reason"
+
     @staticmethod
     def _extract_json(output: str) -> dict:
         for line in output.strip().splitlines():

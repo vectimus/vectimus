@@ -128,11 +128,12 @@ def _vectimus_cmd() -> str:
     ``python -m vectimus.cli.main`` for development installs where the
     console script isn't available.
     """
-    found = shutil.which("vectimus")
-    if found:
-        return found
     import shlex
     import sys
+
+    found = shutil.which("vectimus")
+    if found:
+        return shlex.quote(found)
 
     return f"{shlex.quote(sys.executable)} -m vectimus.cli.main"
 

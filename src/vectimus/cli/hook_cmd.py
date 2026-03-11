@@ -144,7 +144,7 @@ def hook_cmd(source: str) -> None:
             decision_val = result.get("decision", "deny")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
-                if hook_output is None:
+                if hook_output is None or source != "claude-code":
                     reason = result.get("reason", "Denied by Vectimus")
                     hook_output = _deny_output(source, payload, reason)
                 print(json.dumps(hook_output))
