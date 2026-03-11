@@ -172,10 +172,12 @@ class TestAllowBehaviour:
 
 
 class TestEscalateFailsClosed:
-    """ESCALATE must always be denied (fail closed).
+    """ESCALATE must produce exit code 2 with deny (local mode).
 
-    This is a critical invariant: only explicit ALLOW produces exit 0.
-    ESCALATE means "needs human approval" which must block the action.
+    Local hooks cannot reliably prompt the user for approval due to
+    limitations in Claude Code and Cursor.  Escalate falls back to deny
+    with a descriptive message.  Server mode can implement real approval
+    workflows (PagerDuty, Slack, etc.).
     """
 
     def test_escalate_denied_local_claude_code(self, tmp_path, monkeypatch) -> None:
@@ -200,7 +202,9 @@ class TestEscalateFailsClosed:
             exit_code, output = _run_hook("claude-code", payload)
 
         assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
-        assert "deny" in output.lower()
+        result = self._extract_json(output)
+        assert result["permissionDecision"] == "deny"
+        assert "[escalate]" in result["permissionDecisionReason"]
 
     def test_escalate_denied_local_cursor(self, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -222,9 +226,10 @@ class TestEscalateFailsClosed:
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("cursor", payload)
 
-        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        assert exit_code == 2, "ESCALATE must produce exit code 2"
         result = self._extract_json(output)
         assert result["permission"] == "deny"
+        assert "[escalate]" in result["user_message"]
 
     def test_escalate_denied_local_copilot(self, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -247,12 +252,13 @@ class TestEscalateFailsClosed:
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("copilot", payload)
 
-        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        assert exit_code == 2, "ESCALATE must produce exit code 2"
         result = self._extract_json(output)
         assert result["permissionDecision"] == "deny"
+        assert "[escalate]" in result["permissionDecisionReason"]
 
     def test_escalate_denied_server_mode(self, tmp_path, monkeypatch) -> None:
-        """When server returns ESCALATE, hook must deny."""
+        """When server returns ESCALATE, hook must deny locally."""
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
@@ -277,8 +283,8 @@ class TestEscalateFailsClosed:
         ):
             exit_code, output = _run_hook("claude-code", payload)
 
-        assert exit_code == 2, "ESCALATE from server must produce exit code 2 (deny)"
-        assert "deny" in output.lower()
+        assert exit_code == 2, "ESCALATE from server must produce exit code 2"
+        assert "escalate" in output.lower()
 
     def test_server_mode_cursor_gets_cursor_format(self, tmp_path, monkeypatch) -> None:
         """Server mode must return Cursor-format deny, not Claude Code format.

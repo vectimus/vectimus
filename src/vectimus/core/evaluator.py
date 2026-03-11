@@ -41,12 +41,14 @@ class _PolicyMeta:
         suggested_alternative: str = "",
         incident: str = "",
         controls: str = "",
+        enforcement: str = "deny",
     ) -> None:
         self.policy_id = policy_id
         self.description = description
         self.suggested_alternative = suggested_alternative
         self.incident = incident
         self.controls = controls
+        self.enforcement = enforcement
 
 
 def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], list[str]]:
@@ -74,6 +76,7 @@ def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], li
         suggested_alt = ""
         incident = ""
         controls = ""
+        enforcement = "deny"
 
         for ann_match in re.finditer(r'@(\w+)\("([^"]*)"\)', annotation_block):
             key = ann_match.group(1)
@@ -88,6 +91,9 @@ def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], li
                 incident = value
             elif key == "controls":
                 controls = value
+            elif key == "enforcement":
+                if value in ("deny", "escalate", "observe"):
+                    enforcement = value
 
         ordered_ids.append(policy_id)
         if policy_id:
@@ -97,6 +103,7 @@ def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], li
                 suggested_alternative=suggested_alt,
                 incident=incident,
                 controls=controls,
+                enforcement=enforcement,
             )
 
     return metadata, ordered_ids
@@ -182,8 +189,11 @@ class PolicyEngine:
         elapsed_ms = (time.perf_counter() - start) * 1000
         decision.evaluation_time_ms = round(elapsed_ms, 3)
 
-        # Observe mode: log what would have been denied but allow everything.
-        if self._observe and decision.decision == DecisionVerdict.DENY:
+        # Observe mode: log what would have been denied/escalated but allow everything.
+        if self._observe and decision.decision in (
+            DecisionVerdict.DENY,
+            DecisionVerdict.ESCALATE,
+        ):
             logger.info(
                 "observe_mode_would_deny",
                 reason=decision.reason,
@@ -273,12 +283,7 @@ class PolicyEngine:
                     suggested_alt = meta.suggested_alternative
                 break
 
-        return Decision(
-            decision=DecisionVerdict.DENY,
-            reason=reason_text,
-            suggested_alternative=suggested_alt,
-            matched_policy_ids=matched_ids,
-        )
+        return self._apply_enforcement(matched_ids, reason_text, suggested_alt)
 
     def _evaluate_content(self, event: VectimusEvent, content: str) -> Decision:
         """Run a second Cedar evaluation treating content as a shell command.
@@ -332,6 +337,60 @@ class PolicyEngine:
                 if meta.suggested_alternative:
                     suggested_alt = meta.suggested_alternative
                 break
+
+        return self._apply_enforcement(matched_ids, reason_text, suggested_alt)
+
+    def _resolve_enforcement(self, policy_id: str) -> str:
+        """Resolve the effective enforcement level for a policy.
+
+        Resolution order: config override (project-local > global) >
+        @enforcement annotation > "deny" default.
+        """
+        # Check config-based overrides first.
+        if self._loader is not None:
+            project_path = getattr(self._loader, "_project_path", None)
+            override = self._loader.config.get_enforcement_override(policy_id, project_path)
+            if override is not None:
+                return override
+
+        # Fall back to annotation-based enforcement.
+        meta = self._policy_metadata.get(policy_id)
+        if meta:
+            return meta.enforcement
+        return "deny"
+
+    def _apply_enforcement(
+        self,
+        matched_ids: list[str],
+        reason_text: str,
+        suggested_alt: str | None,
+    ) -> Decision:
+        """Apply the enforcement level of the first matched policy to produce a Decision."""
+        enforcement = "deny"
+        for pid in matched_ids:
+            enforcement = self._resolve_enforcement(pid)
+            break
+
+        if enforcement == "observe":
+            logger.info(
+                "per_rule_observe",
+                reason=reason_text,
+                matched_policies=matched_ids,
+            )
+            return Decision(
+                decision=DecisionVerdict.ALLOW,
+                reason=f"[observe] {reason_text}",
+                suggested_alternative=suggested_alt,
+                matched_policy_ids=matched_ids,
+            )
+
+        if enforcement == "escalate":
+            return Decision(
+                decision=DecisionVerdict.ESCALATE,
+                reason=reason_text,
+                suggested_alternative=suggested_alt,
+                matched_policy_ids=matched_ids,
+            )
 
         return Decision(
             decision=DecisionVerdict.DENY,

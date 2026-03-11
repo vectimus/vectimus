@@ -44,7 +44,6 @@ def project_local_config_path(project_path: Path) -> Path:
     return project_path / ".vectimus" / "config.toml"
 
 
-
 class VectimusConfig:
     """Manages ~/.vectimus/config.toml read and write operations."""
 
@@ -197,6 +196,112 @@ class VectimusConfig:
     def project_config_path(self, project_path: Path) -> Path:
         """Return the project config path: <project>/.vectimus/config.toml."""
         return project_local_config_path(project_path)
+
+    # -- Enforcement overrides -----------------------------------------------
+
+    _VALID_ENFORCEMENT_LEVELS = ("deny", "escalate", "observe")
+
+    def get_enforcement_override(
+        self, rule_id: str, project_path: Path | None = None
+    ) -> str | None:
+        """Return the enforcement override for a rule, or None if not overridden.
+
+        Resolution: project-local > global.
+        """
+        if project_path is not None:
+            local_path = project_local_config_path(project_path)
+            if local_path.exists():
+                try:
+                    with open(local_path, "rb") as f:
+                        data = tomllib.load(f)
+                    project_level = data.get("rules", {}).get("enforcement", {}).get(rule_id)
+                    if project_level in self._VALID_ENFORCEMENT_LEVELS:
+                        return project_level
+                except tomllib.TOMLDecodeError:
+                    pass
+
+        global_level = self._data.get("rules", {}).get("enforcement", {}).get(rule_id)
+        if global_level in self._VALID_ENFORCEMENT_LEVELS:
+            return global_level
+        return None
+
+    def set_enforcement_override(
+        self, rule_id: str, level: str, project_path: Path | None = None
+    ) -> None:
+        """Set an enforcement level override for a rule.
+
+        If *project_path* is given, writes to the project-local config.
+        Otherwise writes to the global config.
+        """
+        if level not in self._VALID_ENFORCEMENT_LEVELS:
+            raise ValueError(f"Invalid enforcement level: {level!r}")
+
+        if project_path is not None:
+            local_path = project_local_config_path(project_path)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+
+            data: dict = {}
+            if local_path.exists():
+                try:
+                    with open(local_path, "rb") as f:
+                        data = tomllib.load(f)
+                except tomllib.TOMLDecodeError:
+                    data = {}
+
+            data.setdefault("rules", {}).setdefault("enforcement", {})[rule_id] = level
+            self._write_to_path(local_path, data)
+        else:
+            self._data.setdefault("rules", {}).setdefault("enforcement", {})[rule_id] = level
+            self._write()
+
+    def clear_enforcement_override(self, rule_id: str, project_path: Path | None = None) -> None:
+        """Remove an enforcement level override for a rule."""
+        if project_path is not None:
+            local_path = project_local_config_path(project_path)
+            if not local_path.exists():
+                return
+            try:
+                with open(local_path, "rb") as f:
+                    data = tomllib.load(f)
+            except tomllib.TOMLDecodeError:
+                return
+            enforcement = data.get("rules", {}).get("enforcement", {})
+            if rule_id in enforcement:
+                del enforcement[rule_id]
+                self._write_to_path(local_path, data)
+        else:
+            enforcement = self._data.get("rules", {}).get("enforcement", {})
+            if rule_id in enforcement:
+                del enforcement[rule_id]
+                self._write()
+
+    def effective_enforcement_overrides(self, project_path: Path | None = None) -> dict[str, str]:
+        """Return merged enforcement overrides (project-local wins over global)."""
+        global_overrides = {
+            k: v
+            for k, v in self._data.get("rules", {}).get("enforcement", {}).items()
+            if v in self._VALID_ENFORCEMENT_LEVELS
+        }
+        if project_path is None:
+            return global_overrides
+
+        local_path = project_local_config_path(project_path)
+        if not local_path.exists():
+            return global_overrides
+
+        try:
+            with open(local_path, "rb") as f:
+                data = tomllib.load(f)
+            project_overrides = {
+                k: v
+                for k, v in data.get("rules", {}).get("enforcement", {}).items()
+                if v in self._VALID_ENFORCEMENT_LEVELS
+            }
+        except tomllib.TOMLDecodeError:
+            return global_overrides
+
+        # Project overrides take precedence.
+        return {**global_overrides, **project_overrides}
 
     # -- MCP server allowlist ------------------------------------------------
 

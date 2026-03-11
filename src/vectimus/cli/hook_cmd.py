@@ -38,6 +38,13 @@ def _debug_enabled() -> bool:
     return os.environ.get("VECTIMUS_DEBUG", "").lower() in ("1", "true", "yes")
 
 
+def _log_stderr_overrides(matched_policy_ids: list[str]) -> None:
+    """Log rule disable hints to stderr (visible to human, not the agent)."""
+    for pid in matched_policy_ids:
+        _log_stderr(f"To disable for this project: vectimus rule disable {pid}")
+        _log_stderr(f"To disable everywhere: vectimus rule disable {pid} --global")
+
+
 def _post_to_server(payload: dict, server_url: str, source: str) -> dict | None:
     """POST to the Vectimus server. Returns response dict or None."""
     try:
@@ -82,6 +89,36 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
+    }
+
+
+def _escalate_output(source: str, payload: dict, reason: str) -> dict:
+    """Build the tool-specific escalate output.
+
+    Local hooks cannot reliably prompt the user for approval:
+    - Claude Code ignores "ask" when the tool is in the allow list.
+    - Cursor does not support "ask" on preToolUse hooks.
+
+    So escalate falls back to deny with a descriptive message on all
+    local sources.  Server mode can implement real escalation workflows
+    (e.g. PagerDuty, Slack approval) before returning allow/deny.
+    """
+    escalate_reason = f"[escalate] {reason}. Run this command manually if you approve."
+    agent_reason = (
+        f"[escalate] {reason}. "
+        "This requires human approval -- the user must run it outside the agent."
+    )
+    if source == "cursor":
+        return {
+            "permission": "deny",
+            "user_message": escalate_reason,
+            "agent_message": agent_reason,
+        }
+    event_key = "hook_event_name" if source == "claude-code" else "hookEventName"
+    return {
+        "hookEventName": payload.get(event_key, "PreToolUse"),
+        "permissionDecision": "deny",
+        "permissionDecisionReason": agent_reason,
     }
 
 
@@ -146,7 +183,10 @@ def hook_cmd(source: str) -> None:
                 hook_output = result.get("hookSpecificOutput")
                 if hook_output is None or source != "claude-code":
                     reason = result.get("reason", "Denied by Vectimus")
-                    hook_output = _deny_output(source, payload, reason)
+                    if decision_val == DecisionVerdict.ESCALATE:
+                        hook_output = _escalate_output(source, payload, reason)
+                    else:
+                        hook_output = _deny_output(source, payload, reason)
                 print(json.dumps(hook_output))
                 sys.exit(2)
             sys.exit(0)
@@ -198,12 +238,16 @@ def hook_cmd(source: str) -> None:
     if debug:
         _log_stderr(f"decision={decision.decision} policies={decision.matched_policy_ids}")
 
-    if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
+    if decision.decision == DecisionVerdict.ESCALATE:
+        reason = decision.reason or "Flagged by Vectimus"
+        print(json.dumps(_escalate_output(source, payload, reason)))
+        _log_stderr_overrides(decision.matched_policy_ids)
+        sys.exit(2)
+
+    if decision.decision == DecisionVerdict.DENY:
         reason = decision.reason or "Denied by Vectimus"
         print(json.dumps(_deny_output(source, payload, reason)))
-        for pid in decision.matched_policy_ids:
-            _log_stderr(f"To disable for this project: vectimus rule disable {pid}")
-            _log_stderr(f"To disable everywhere: vectimus rule disable {pid} --global")
+        _log_stderr_overrides(decision.matched_policy_ids)
         sys.exit(2)
 
     sys.exit(0)

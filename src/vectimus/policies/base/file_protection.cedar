@@ -43,6 +43,7 @@ forbid (
     context.file_path like "*.cursor/hooks.json" ||
     context.file_path like "*.cursor/mcp.json" ||
     context.file_path like "*.claude/mcp.json" ||
+    context.file_path like "*.github/hooks/*" ||
     context.file_path like "*.vscode/settings.json" ||
     context.file_path like "*.vscode/tasks.json"
 };
