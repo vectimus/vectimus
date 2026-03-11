@@ -142,7 +142,7 @@ def hook_cmd(source: str) -> None:
         result = _post_to_server(payload, server_url, source)
         if result is not None:
             decision_val = result.get("decision", "deny")
-            if decision_val == DecisionVerdict.DENY:
+            if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
                 if hook_output is None:
                     reason = result.get("reason", "Denied by Vectimus")
@@ -198,7 +198,7 @@ def hook_cmd(source: str) -> None:
     if debug:
         _log_stderr(f"decision={decision.decision} policies={decision.matched_policy_ids}")
 
-    if decision.decision == DecisionVerdict.DENY:
+    if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
         reason = decision.reason or "Denied by Vectimus"
         print(json.dumps(_deny_output(source, payload, reason)))
         for pid in decision.matched_policy_ids:
