@@ -39,7 +39,7 @@ class TestToolDetection:
         monkeypatch.chdir(tmp_path)
         config_dir = tmp_path / ".cursor"
         config_dir.mkdir()
-        hooks = {"beforeShellExecution": {"command": "python -m vectimus.shims.cursor"}}
+        hooks = {"hooks": {"preToolUse": [{"command": "vectimus hook --source cursor"}]}}
         (config_dir / "hooks.json").write_text(json.dumps(hooks))
         assert _check_cursor() is not None
 
@@ -51,7 +51,7 @@ class TestToolDetection:
         monkeypatch.chdir(tmp_path)
         config_dir = tmp_path / ".github" / "hooks"
         config_dir.mkdir(parents=True)
-        config = {"PreToolUse": {"command": "python -m vectimus.shims.copilot"}}
+        config = {"hooks": {"PreToolUse": [{"type": "command", "command": "vectimus hook --source copilot"}]}}
         (config_dir / "vectimus.json").write_text(json.dumps(config))
         assert _check_copilot() is not None
 

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-import shlex
-import sys
+import shutil
 from pathlib import Path
 
 import click
@@ -49,19 +48,6 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
         ToolName.COPILOT: _configure_copilot,
     }
 
-    # Prompt for API key when using server mode.
-    api_key: str | None = None
-    if server_url:
-        api_key = (
-            click.prompt(
-                "API key",
-                hide_input=True,
-                default="",
-                show_default=False,
-            )
-            or None
-        )
-
     report = detect_all()
     tools_configured: list[str] = []
 
@@ -71,7 +57,7 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
         result = report.results.get(tool_name)
 
         if result and result.found:
-            configure_fns[tool_name](server_url, api_key)
+            configure_fns[tool_name]()
             tools_configured.append(tool_name.value)
             method_label = f"({result.method.value})" if result.method else ""
             click.echo(f"  [+] {display_name:<18} {method_label:<8} hook config written")
@@ -88,6 +74,8 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
 
     # -- Create config file -------------------------------------------------
     config = VectimusConfig.create_default()
+    if server_url:
+        config.set_server_url(server_url)
     click.echo(f"\n  Config: {config.path}")
 
     # Ensure the projects directory exists for per-project overrides.
@@ -126,16 +114,27 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
     else:
         click.echo("Policies: built-in defaults")
 
-    if api_key:
+    if server_url:
         click.echo(
-            "\nWarning: Hook config files contain your API key.\n"
-            "Add them to .gitignore to avoid committing secrets."
+            "\nServer URL saved to config. Set VECTIMUS_API_KEY in your\n"
+            "environment if the server requires authentication."
         )
 
 
-def _python_cmd() -> str:
-    """Return a shell-safe path to the Python running vectimus."""
-    return shlex.quote(sys.executable)
+def _vectimus_cmd() -> str:
+    """Return the path to the vectimus CLI binary.
+
+    Prefers the ``vectimus`` binary on PATH.  Falls back to running
+    ``python -m vectimus.cli.main`` for development installs where the
+    console script isn't available.
+    """
+    found = shutil.which("vectimus")
+    if found:
+        return found
+    import shlex
+    import sys
+
+    return f"{shlex.quote(sys.executable)} -m vectimus.cli.main"
 
 
 def _is_vectimus_hook(hook: dict) -> bool:
@@ -147,27 +146,16 @@ def _is_vectimus_hook(hook: dict) -> bool:
     return False
 
 
-def _configure_claude_code(server_url: str | None, api_key: str | None = None) -> None:
+def _configure_claude_code() -> None:
     """Write .claude/settings.json with Vectimus hooks, preserving existing hooks."""
     config_dir = Path(".claude")
     config_dir.mkdir(exist_ok=True)
     settings_path = config_dir / "settings.json"
 
-    if server_url:
-        headers: dict[str, str] = {"X-Vectimus-Source": "claude-code"}
-        if api_key:
-            headers["X-Vectimus-API-Key"] = api_key
-        vectimus_hook = {
-            "type": "http",
-            "url": f"{server_url.rstrip('/')}/evaluate",
-            "timeout": 10,
-            "headers": headers,
-        }
-    else:
-        vectimus_hook = {
-            "type": "command",
-            "command": f"{_python_cmd()} -m vectimus.shims.claude_code",
-        }
+    vectimus_hook: dict = {
+        "type": "command",
+        "command": f"{_vectimus_cmd()} hook --source claude-code",
+    }
 
     settings: dict = {}
     if settings_path.exists():
@@ -197,21 +185,13 @@ def _configure_claude_code(server_url: str | None, api_key: str | None = None) -
         raise SystemExit(1)
 
 
-def _configure_cursor(server_url: str | None, api_key: str | None = None) -> None:
+def _configure_cursor() -> None:
     """Write .cursor/hooks.json with Vectimus hooks, preserving existing hooks."""
     config_dir = Path(".cursor")
     config_dir.mkdir(exist_ok=True)
     hooks_path = config_dir / "hooks.json"
 
-    if server_url:
-        url = f"{server_url.rstrip('/')}/evaluate"
-        key_header = f" -H {shlex.quote(f'X-Vectimus-API-Key: {api_key}')}" if api_key else ""
-        command = (
-            f"curl -s -X POST -H 'Content-Type: application/json'"
-            f" -H 'X-Vectimus-Source: cursor'{key_header} -d @- {shlex.quote(url)}"
-        )
-    else:
-        command = f"{_python_cmd()} -m vectimus.shims.cursor"
+    command = f"{_vectimus_cmd()} hook --source cursor"
 
     existing: dict = {}
     if hooks_path.exists():
@@ -241,21 +221,13 @@ def _configure_cursor(server_url: str | None, api_key: str | None = None) -> Non
         raise SystemExit(1)
 
 
-def _configure_copilot(server_url: str | None, api_key: str | None = None) -> None:
+def _configure_copilot() -> None:
     """Write .github/hooks/ config for Copilot / VS Code, preserving existing hooks."""
     config_dir = Path(".github") / "hooks"
     config_dir.mkdir(parents=True, exist_ok=True)
     hook_path = config_dir / "vectimus.json"
 
-    if server_url:
-        url = f"{server_url.rstrip('/')}/evaluate"
-        key_header = f" -H {shlex.quote(f'X-Vectimus-API-Key: {api_key}')}" if api_key else ""
-        command = (
-            f"curl -s -X POST -H 'Content-Type: application/json'"
-            f" -H 'X-Vectimus-Source: copilot'{key_header} -d @- {shlex.quote(url)}"
-        )
-    else:
-        command = f"{_python_cmd()} -m vectimus.shims.copilot"
+    command = f"{_vectimus_cmd()} hook --source copilot"
 
     existing: dict = {}
     if hook_path.exists():
