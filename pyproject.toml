@@ -1,6 +1,6 @@
 [project]
 name = "vectimus"
-version = "0.15.0"
+version = "0.16.0"
 description = "Stop your AI agents from breaking things. Intercepts every action and blocks the dangerous ones before they execute."
 readme = "README.md"
 license = "Apache-2.0"
