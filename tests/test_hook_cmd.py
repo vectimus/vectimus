@@ -171,6 +171,127 @@ class TestAllowBehaviour:
         assert exit_code == 0
 
 
+class TestEscalateFailsClosed:
+    """ESCALATE must always be denied (fail closed).
+
+    This is a critical invariant: only explicit ALLOW produces exit 0.
+    ESCALATE means "needs human approval" which must block the action.
+    """
+
+    def test_escalate_denied_local_claude_code(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import Decision, DecisionVerdict
+
+        escalate_decision = Decision(
+            decision=DecisionVerdict.ESCALATE,
+            reason="Requires human approval",
+            matched_policy_ids=["test-escalate-001"],
+        )
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.evaluate.return_value = escalate_decision
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        assert "deny" in output.lower()
+
+    def test_escalate_denied_local_cursor(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import Decision, DecisionVerdict
+
+        escalate_decision = Decision(
+            decision=DecisionVerdict.ESCALATE,
+            reason="Requires human approval",
+            matched_policy_ids=["test-escalate-001"],
+        )
+        payload = {
+            "command": "echo test",
+            "hook_event_name": "beforeShellExecution",
+            "cwd": str(tmp_path),
+        }
+        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.evaluate.return_value = escalate_decision
+            exit_code, output = _run_hook("cursor", payload)
+
+        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        result = self._extract_json(output)
+        assert result["permission"] == "deny"
+
+    def test_escalate_denied_local_copilot(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import Decision, DecisionVerdict
+
+        escalate_decision = Decision(
+            decision=DecisionVerdict.ESCALATE,
+            reason="Requires human approval",
+            matched_policy_ids=["test-escalate-001"],
+        )
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+            "hookEventName": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.evaluate.return_value = escalate_decision
+            exit_code, output = _run_hook("copilot", payload)
+
+        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        result = self._extract_json(output)
+        assert result["permissionDecision"] == "deny"
+
+    def test_escalate_denied_server_mode(self, tmp_path, monkeypatch) -> None:
+        """When server returns ESCALATE, hook must deny."""
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        from vectimus.core.models import DecisionVerdict
+
+        server_response = {
+            "decision": DecisionVerdict.ESCALATE,
+            "reason": "Requires human approval",
+        }
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        with (
+            patch(
+                "vectimus.core.config.VectimusConfig.get_server_url",
+                return_value="http://localhost:8080",
+            ),
+            patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),
+        ):
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 2, "ESCALATE from server must produce exit code 2 (deny)"
+        assert "deny" in output.lower()
+
+    @staticmethod
+    def _extract_json(output: str) -> dict:
+        for line in output.strip().splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+        raise ValueError(f"No JSON found in output: {output!r}")
+
+
 class TestDebugMode:
     """VECTIMUS_DEBUG should produce stderr diagnostics."""
 
