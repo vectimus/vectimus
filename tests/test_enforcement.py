@@ -170,6 +170,39 @@ class TestEnforcementEvaluation:
         assert decision.decision == DecisionVerdict.DENY
         assert "deny-001" in decision.matched_policy_ids
 
+    def test_strictest_enforcement_wins(self, tmp_path, make_event):
+        """When multiple policies match, the strictest enforcement wins."""
+        combined = textwrap.dedent("""\
+            @id("obs-multi")
+            @description("Observe rule")
+            @enforcement("observe")
+            forbid (
+                principal,
+                action == Vectimus::Action::"shell_command",
+                resource
+            ) when {
+                context.command like "*echo multi-test*"
+            };
+
+            @id("deny-multi")
+            @description("Deny rule")
+            @enforcement("deny")
+            forbid (
+                principal,
+                action == Vectimus::Action::"shell_command",
+                resource
+            ) when {
+                context.command like "*echo multi-test*"
+            };
+        """)
+        policy_file = tmp_path / "test.cedar"
+        policy_file.write_text(combined)
+        engine = PolicyEngine(policy_dir=str(tmp_path))
+        event = make_event(command="echo multi-test")
+        decision = engine.evaluate(event)
+        # deny is stricter than observe, so deny must win.
+        assert decision.decision == DecisionVerdict.DENY
+
     def test_global_observe_overrides_escalate(self, tmp_path, make_event):
         """Global observe mode downgrades ESCALATE to ALLOW."""
         policy_file = tmp_path / "test.cedar"

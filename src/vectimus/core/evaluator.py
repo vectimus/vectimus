@@ -359,17 +359,22 @@ class PolicyEngine:
             return meta.enforcement
         return "deny"
 
+    _ENFORCEMENT_PRIORITY = {"observe": 0, "escalate": 1, "deny": 2}
+
     def _apply_enforcement(
         self,
         matched_ids: list[str],
         reason_text: str,
         suggested_alt: str | None,
     ) -> Decision:
-        """Apply the enforcement level of the first matched policy to produce a Decision."""
-        enforcement = "deny"
+        """Apply the strictest enforcement level across all matched policies."""
+        enforcement = "observe"
         for pid in matched_ids:
-            enforcement = self._resolve_enforcement(pid)
-            break
+            level = self._resolve_enforcement(pid)
+            if self._ENFORCEMENT_PRIORITY.get(level, 0) > self._ENFORCEMENT_PRIORITY.get(
+                enforcement, 0
+            ):
+                enforcement = level
 
         if enforcement == "observe":
             logger.info(
