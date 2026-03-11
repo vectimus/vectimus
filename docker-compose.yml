@@ -6,7 +6,7 @@ services:
     environment:
       - VECTIMUS_HOST=0.0.0.0
       - VECTIMUS_PORT=8420
-      - VECTIMUS_WORKERS=2
+      # - VECTIMUS_WORKERS=2  # Note: workers > 1 disables SSE /events and session flood detection
       # - VECTIMUS_API_KEY=changeme
       # - VECTIMUS_API_KEYS=team1:key1,team2:key2
       # - VECTIMUS_CORS_ORIGINS=https://dashboard.example.com

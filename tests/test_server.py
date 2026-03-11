@@ -841,6 +841,31 @@ async def test_multi_key_probes_exempt(multi_key_client: AsyncClient) -> None:
         assert resp.status_code == 200, f"{path} should be exempt from auth"
 
 
+@pytest.mark.asyncio
+async def test_cors_preflight_exempt_from_auth() -> None:
+    """OPTIONS preflight requests should pass through auth middleware."""
+    from vectimus.server.config import ApiKeyEntry
+
+    config = ServerConfig(
+        api_keys=[ApiKeyEntry(name="team", key="secret")],
+        cors_origins=["https://dashboard.example.com"],
+    )
+    app = create_app(config)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.options(
+            "/evaluate",
+            headers={
+                "Origin": "https://dashboard.example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "X-Vectimus-API-Key",
+            },
+        )
+        # Should not be 401 — preflight must pass through to CORS middleware
+        assert resp.status_code == 200
+        assert "access-control-allow-origin" in resp.headers
+
+
 # ---------------------------------------------------------------------------
 # Config: TLS, workers, CORS, named keys
 # ---------------------------------------------------------------------------

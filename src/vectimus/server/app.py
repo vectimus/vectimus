@@ -94,7 +94,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         @app.middleware("http")
         async def check_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
             """Reject requests missing a valid API key."""
-            if request.url.path in _AUTH_EXEMPT_PATHS:
+            if request.method == "OPTIONS" or request.url.path in _AUTH_EXEMPT_PATHS:
                 return await call_next(request)
 
             provided = request.headers.get("X-Vectimus-API-Key", "")
