@@ -66,14 +66,14 @@ def remove_cmd(force: bool) -> None:
     if not force:
         click.confirm("\nRemove these hooks?", abort=True)
 
-    _REMOVE_DISPATCH = {
+    remove_dispatch = {
         "Claude Code": _remove_claude_code,
         "Cursor": _remove_cursor,
         "VS Code / Copilot": _remove_copilot,
     }
 
     for display_name, path in removals:
-        handler = _REMOVE_DISPATCH.get(display_name)
+        handler = remove_dispatch.get(display_name)
         if handler:
             handler(path)
         click.echo(f"  [-] {display_name:<18} hooks removed")

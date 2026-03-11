@@ -51,7 +51,8 @@ class TestToolDetection:
         monkeypatch.chdir(tmp_path)
         config_dir = tmp_path / ".github" / "hooks"
         config_dir.mkdir(parents=True)
-        config = {"hooks": {"PreToolUse": [{"type": "command", "command": "vectimus hook --source copilot"}]}}
+        hook = {"type": "command", "command": "vectimus hook --source copilot"}
+        config = {"hooks": {"PreToolUse": [hook]}}
         (config_dir / "vectimus.json").write_text(json.dumps(config))
         assert _check_copilot() is not None
 
