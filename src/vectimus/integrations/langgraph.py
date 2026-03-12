@@ -3,7 +3,8 @@
 Provides two mechanisms for governing tool calls in LangChain agents
 and LangGraph workflows:
 
-1. ``VectimusMiddleware`` — for use with ``create_agent(middleware=[...])``.
+1. ``VectimusMiddleware`` — a callable that wraps tool execution via
+   LangGraph's ``ToolNode(awrap_tool_call=...)`` interface.
 2. ``create_interceptor`` — factory that returns an MCP tool call interceptor
    for use with ``MultiServerMCPClient(tool_interceptors=[...])``.
 
@@ -14,12 +15,12 @@ and allow or block accordingly.
 Usage::
 
     from vectimus.integrations.langgraph import VectimusMiddleware
+    from langgraph.prebuilt import create_react_agent
+    from langgraph.prebuilt.tool_node import ToolNode
 
-    middleware = VectimusMiddleware(
-        policy_dir="./policies",
-        observe_mode=False,
-    )
-    agent = create_agent(model=model, tools=tools, middleware=[middleware])
+    middleware = VectimusMiddleware(observe_mode=False)
+    tool_node = ToolNode(tools, awrap_tool_call=middleware)
+    agent = create_react_agent(model=model, tools=tool_node)
 
 For MCP interceptors::
 
@@ -190,26 +191,23 @@ def _format_denial(policy_ids: list[str], reason: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# VectimusMiddleware — for create_agent(middleware=[...])
+# VectimusMiddleware — for ToolNode(awrap_tool_call=...)
 # ---------------------------------------------------------------------------
 
 
 class VectimusMiddleware:
-    """LangChain agent middleware that evaluates tool calls against Cedar policies.
+    """Callable that evaluates LangGraph tool calls against Cedar policies.
 
-    Usage::
+    Designed for use with LangGraph's ``ToolNode`` as an async tool call
+    wrapper.  Pass the instance directly as ``awrap_tool_call``::
 
         from vectimus.integrations.langgraph import VectimusMiddleware
+        from langgraph.prebuilt import create_react_agent
+        from langgraph.prebuilt.tool_node import ToolNode
 
-        middleware = VectimusMiddleware(
-            policy_dir="./policies",
-            observe_mode=False,
-        )
-        agent = create_agent(
-            model="openai:gpt-4.1",
-            tools=my_tools,
-            middleware=[middleware],
-        )
+        middleware = VectimusMiddleware(observe_mode=False)
+        tool_node = ToolNode(tools, awrap_tool_call=middleware)
+        agent = create_react_agent(model=model, tools=tool_node)
 
     Parameters
     ----------
@@ -225,6 +223,9 @@ class VectimusMiddleware:
         Working directory context for policy evaluation.
     log_dir:
         Directory for audit log JSONL files.  Defaults to ``~/.vectimus/logs``.
+    loader:
+        Optional PolicyLoader for custom pack discovery.  Takes precedence
+        over *policy_dir* when provided.
     """
 
     def __init__(
@@ -234,22 +235,27 @@ class VectimusMiddleware:
         principal: str = "langgraph-agent",
         cwd: str | None = None,
         log_dir: str | None = None,
+        loader: Any | None = None,
     ) -> None:
         _check_langchain_installed()
-        self._engine = PolicyEngine(policy_dir=policy_dir, observe=observe_mode)
+        self._engine = PolicyEngine(policy_dir=policy_dir, loader=loader, observe=observe_mode)
         self._observe = observe_mode
         self._principal = principal
         self._cwd = cwd
         self._log_dir = log_dir
 
-    async def __call__(
-        self,
-        tool_name: str,
-        tool_args: dict[str, Any],
-        call_next: Callable[..., Any],
-        **kwargs: Any,
-    ) -> Any:
-        """Evaluate the tool call and either allow or block it."""
+    async def __call__(self, request: Any, execute: Callable[..., Any]) -> Any:
+        """Evaluate a tool call request and either allow or block it.
+
+        Compatible with LangGraph's ``ToolNode(awrap_tool_call=...)``
+        interface.  *request* is a ``ToolCallRequest`` with a
+        ``.tool_call`` dict containing ``name``, ``args`` and ``id``.
+        *execute* is the async callable that runs the tool.
+        """
+        tool_call = request.tool_call
+        tool_name = tool_call["name"]
+        tool_args = tool_call.get("args", {})
+
         event = _build_event(
             tool_name,
             tool_args,
@@ -261,11 +267,17 @@ class VectimusMiddleware:
         write_audit(event, decision, log_dir=self._log_dir)
 
         if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
-            # In observe mode the engine already downgrades DENY/ESCALATE → ALLOW,
-            # so reaching here means enforcement is active.
-            return _format_denial(decision.matched_policy_ids, decision.reason)
+            # In observe mode the engine already downgrades DENY/ESCALATE
+            # to ALLOW, so reaching here means enforcement is active.
+            from langchain_core.messages import ToolMessage
 
-        return await call_next(tool_name, tool_args, **kwargs)
+            return ToolMessage(
+                content=_format_denial(decision.matched_policy_ids, decision.reason),
+                tool_call_id=tool_call["id"],
+                name=tool_name,
+            )
+
+        return await execute(request)
 
 
 # ---------------------------------------------------------------------------

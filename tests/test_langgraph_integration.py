@@ -20,11 +20,33 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+class _FakeToolMessage:
+    """Minimal stand-in for langchain_core.messages.ToolMessage."""
+
+    def __init__(self, content, tool_call_id, name):
+        self.content = content
+        self.tool_call_id = tool_call_id
+        self.name = name
+
+
 def _mock_langchain():
-    """Context manager that makes ``import langchain`` succeed even when not installed."""
-    fake = types.ModuleType("langchain")
-    fake.__version__ = "0.3.0"
-    return patch.dict(sys.modules, {"langchain": fake})
+    """Context manager that makes langchain imports succeed even when not installed."""
+    fake_lc = types.ModuleType("langchain")
+    fake_lc.__version__ = "0.3.0"
+
+    fake_core = types.ModuleType("langchain_core")
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.ToolMessage = _FakeToolMessage
+    fake_core.messages = fake_messages
+
+    return patch.dict(
+        sys.modules,
+        {
+            "langchain": fake_lc,
+            "langchain_core": fake_core,
+            "langchain_core.messages": fake_messages,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,95 +140,120 @@ class TestEventBuilding:
 class TestVectimusMiddleware:
     """Test the VectimusMiddleware class."""
 
+    @pytest.fixture(autouse=True)
+    def _patch_langchain(self):
+        """Keep langchain mocked for the entire test, not just __init__."""
+        with _mock_langchain():
+            yield
+
     @pytest.fixture()
     def middleware(self):
         from vectimus.integrations.langgraph import VectimusMiddleware
 
-        with _mock_langchain():
-            return VectimusMiddleware(observe_mode=False)
+        return VectimusMiddleware(observe_mode=False)
 
     @pytest.fixture()
     def middleware_observe(self):
         from vectimus.integrations.langgraph import VectimusMiddleware
 
-        with _mock_langchain():
-            return VectimusMiddleware(observe_mode=True)
+        return VectimusMiddleware(observe_mode=True)
+
+    def _make_request(self, tool_name, tool_args, tool_call_id="call_123"):
+        """Build a mock ToolCallRequest."""
+        request = MagicMock()
+        request.tool_call = {
+            "name": tool_name,
+            "args": tool_args,
+            "id": tool_call_id,
+        }
+        return request
 
     def test_allowed_tool_call_proceeds(self, middleware) -> None:
-        """A safe tool call should pass through to call_next."""
-        call_next = AsyncMock(return_value="file contents here")
+        """A safe tool call should pass through to execute."""
+        request = self._make_request("file_read", {"path": "/home/user/readme.txt"})
+        execute = AsyncMock(return_value="file contents here")
 
-        result = _run(middleware("file_read", {"path": "/home/user/readme.txt"}, call_next))
+        result = _run(middleware(request, execute))
 
-        call_next.assert_awaited_once()
+        execute.assert_awaited_once_with(request)
         assert result == "file contents here"
 
     def test_denied_tool_call_blocked(self, middleware) -> None:
         """A dangerous tool call (rm -rf /) should be blocked."""
-        call_next = AsyncMock(return_value="should not reach")
+        request = self._make_request("bash", {"command": "rm -rf /"})
+        execute = AsyncMock(return_value="should not reach")
 
-        result = _run(middleware("bash", {"command": "rm -rf /"}, call_next))
+        result = _run(middleware(request, execute))
 
-        call_next.assert_not_awaited()
-        assert "Blocked by Vectimus" in result
+        execute.assert_not_awaited()
+        assert "Blocked by Vectimus" in result.content
 
-    def test_denial_message_includes_policy_id(self, middleware) -> None:
-        """The denial message should reference the matched policy."""
-        call_next = AsyncMock()
+    def test_denial_returns_tool_message(self, middleware) -> None:
+        """Denied calls return a ToolMessage with the correct tool_call_id."""
+        request = self._make_request("bash", {"command": "rm -rf /"}, tool_call_id="call_456")
+        execute = AsyncMock()
 
-        result = _run(middleware("bash", {"command": "rm -rf /"}, call_next))
+        result = _run(middleware(request, execute))
 
-        assert "vectimus-base-001" in result or "Blocked by Vectimus" in result
+        assert result.tool_call_id == "call_456"
+        assert result.name == "bash"
+        assert "Blocked by Vectimus" in result.content
 
     def test_observe_mode_allows_denied_action(self, middleware_observe) -> None:
         """In observe mode, a would-be-denied action should still proceed."""
-        call_next = AsyncMock(return_value="executed")
+        request = self._make_request("bash", {"command": "rm -rf /"})
+        execute = AsyncMock(return_value="executed")
 
-        result = _run(middleware_observe("bash", {"command": "rm -rf /"}, call_next))
+        result = _run(middleware_observe(request, execute))
 
-        call_next.assert_awaited_once()
+        execute.assert_awaited_once()
         assert result == "executed"
 
     def test_multiple_tool_calls_independently_evaluated(self, middleware) -> None:
         """Each tool call in a sequence is independently evaluated."""
-        call_next_safe = AsyncMock(return_value="ok")
-        call_next_danger = AsyncMock(return_value="should not reach")
+        request_safe = self._make_request("file_read", {"path": "/home/user/code.py"})
+        request_danger = self._make_request("bash", {"command": "rm -rf /"})
+        execute_safe = AsyncMock(return_value="ok")
+        execute_danger = AsyncMock(return_value="should not reach")
 
         # Safe call
-        result1 = _run(middleware("file_read", {"path": "/home/user/code.py"}, call_next_safe))
+        result1 = _run(middleware(request_safe, execute_safe))
         assert result1 == "ok"
-        call_next_safe.assert_awaited_once()
+        execute_safe.assert_awaited_once()
 
         # Dangerous call
-        result2 = _run(middleware("bash", {"command": "rm -rf /"}, call_next_danger))
-        call_next_danger.assert_not_awaited()
-        assert "Blocked" in result2
+        result2 = _run(middleware(request_danger, execute_danger))
+        execute_danger.assert_not_awaited()
+        assert "Blocked" in result2.content
 
     def test_npm_publish_blocked(self, middleware) -> None:
         """npm publish should be blocked by policy."""
-        call_next = AsyncMock()
+        request = self._make_request("bash", {"command": "npm publish"})
+        execute = AsyncMock()
 
-        result = _run(middleware("bash", {"command": "npm publish"}, call_next))
+        result = _run(middleware(request, execute))
 
-        call_next.assert_not_awaited()
-        assert "Blocked" in result
+        execute.assert_not_awaited()
+        assert "Blocked" in result.content
 
     def test_audit_trail_written(self, middleware) -> None:
         """Every evaluation writes to the audit trail."""
-        call_next = AsyncMock(return_value="ok")
+        request = self._make_request("file_read", {"path": "/tmp/safe.txt"})
+        execute = AsyncMock(return_value="ok")
 
         with patch("vectimus.integrations.langgraph.write_audit") as mock_audit:
-            _run(middleware("file_read", {"path": "/tmp/safe.txt"}, call_next))
+            _run(middleware(request, execute))
             mock_audit.assert_called_once()
             event, decision = mock_audit.call_args[0]
             assert event.source.tool == "langgraph"
 
     def test_audit_trail_on_deny(self, middleware) -> None:
         """Denied actions also get audit trail entries."""
-        call_next = AsyncMock()
+        request = self._make_request("bash", {"command": "rm -rf /"})
+        execute = AsyncMock()
 
         with patch("vectimus.integrations.langgraph.write_audit") as mock_audit:
-            _run(middleware("bash", {"command": "rm -rf /"}, call_next))
+            _run(middleware(request, execute))
             mock_audit.assert_called_once()
 
 
