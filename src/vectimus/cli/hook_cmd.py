@@ -26,7 +26,7 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import DecisionVerdict
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "cursor", "copilot", "gemini-cli")
+VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli")
 
 
 def _log_stderr(msg: str) -> None:
@@ -88,8 +88,9 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "decision": "deny",
             "reason": reason,
         }
-    # claude-code and copilot use the same format
-    event_key = "hook_event_name" if source == "claude-code" else "hookEventName"
+    # claude-code, claude-agent-sdk and copilot use the same format
+    _claude_sources = ("claude-code", "claude-agent-sdk")
+    event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
     return {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
@@ -124,7 +125,8 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "decision": "deny",
             "reason": agent_reason,
         }
-    event_key = "hook_event_name" if source == "claude-code" else "hookEventName"
+    _claude_sources = ("claude-code", "claude-agent-sdk")
+    event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
     return {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
@@ -235,7 +237,7 @@ def hook_cmd(source: str) -> None:
             decision_val = result.get("decision", "deny")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
-                if hook_output is None or source not in ("claude-code",):
+                if hook_output is None or source not in ("claude-code", "claude-agent-sdk"):
                     reason = result.get("reason", "Denied by Vectimus")
                     if decision_val == DecisionVerdict.ESCALATE:
                         _emit_deny(source, payload, reason, escalate=True)

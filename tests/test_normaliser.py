@@ -164,6 +164,91 @@ class TestClaudeCodeNormaliser:
         assert "team_name=my-swarm" in event.action.command
 
 
+class TestClaudeAgentSDKCompatibility:
+    """Verify Claude Agent SDK payloads are normalised identically to Claude Code.
+
+    The Claude Agent SDK shares the same hook system as Claude Code.  These tests
+    confirm that the normaliser produces equivalent events for both source names
+    and acts as a regression guard against future divergence.
+    """
+
+    def test_bash_command_same_as_claude_code(self) -> None:
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "hook_event_name": "PreToolUse",
+            "session_id": "sdk-session-1",
+            "cwd": "/home/user/project",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.action.action_type == ActionType.SHELL_COMMAND
+        assert event.action.command == "ls -la"
+        assert event.source.tool == "claude-agent-sdk"
+        assert event.context.cwd == "/home/user/project"
+        assert event.event_type == EventType.PRE_ACTION
+
+    def test_file_write(self) -> None:
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "src/main.py", "content": "print('hello')"},
+            "hook_event_name": "PreToolUse",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == "src/main.py"
+        assert event.action.file_content == "print('hello')"
+        assert event.source.tool == "claude-agent-sdk"
+
+    def test_agent_spawn(self) -> None:
+        payload = {
+            "tool_name": "Agent",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "mode": "bypassPermissions",
+                "max_turns": 100,
+                "run_in_background": True,
+                "name": "researcher",
+                "prompt": "Do something",
+            },
+            "hook_event_name": "PreToolUse",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.action.action_type == ActionType.AGENT_SPAWN
+        assert "mode=bypassPermissions" in event.action.command
+        assert "EXCESSIVE_TURNS" in event.action.command
+        assert event.source.tool == "claude-agent-sdk"
+
+    def test_mcp_tool(self) -> None:
+        payload = {
+            "tool_name": "mcp__github__create_issue",
+            "tool_input": {"title": "Bug report"},
+            "hook_event_name": "PreToolUse",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.action.action_type == ActionType.MCP_TOOL
+        assert event.action.mcp_server == "github"
+        assert event.action.mcp_tool == "create_issue"
+        assert event.source.tool == "claude-agent-sdk"
+
+    def test_infrastructure_detection(self) -> None:
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "terraform plan"},
+            "hook_event_name": "PreToolUse",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.action.action_type == ActionType.INFRASTRUCTURE
+
+    def test_post_tool_use(self) -> None:
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo done"},
+            "hook_event_name": "PostToolUse",
+        }
+        event = normalise(payload, "claude-agent-sdk")
+        assert event.event_type == EventType.POST_ACTION
+
+
 class TestClaudeCodeContentExtraction:
     """Tests for file_content and script_content extraction."""
 

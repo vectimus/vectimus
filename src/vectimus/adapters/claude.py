@@ -32,6 +32,7 @@ from vectimus.engine.normaliser import (
 )
 
 
+@register("claude-agent-sdk")
 @register("claude-code")
 def _normalise_claude_code(payload: dict[str, Any]) -> VectimusEvent:
     """Normalise a Claude Code hook payload."""
