@@ -338,6 +338,7 @@ def create_interceptor(
         write_audit(event, decision, log_dir=log_dir)
 
         if decision.decision == DecisionVerdict.DENY:
+        if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
             return _format_denial(decision.matched_policy_ids, decision.reason)
 
         return await handler(request)
