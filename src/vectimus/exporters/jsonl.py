@@ -16,7 +16,7 @@ from pathlib import Path
 from vectimus.engine.models import AuditRecord
 from vectimus.exporters.base import BaseExporter
 
-_DEFAULT_DIR = Path.home() / ".vectimus"
+_DEFAULT_DIR = Path.home() / ".vectimus" / "logs"
 _MAX_FILE_BYTES = 100 * 1024 * 1024  # 100 MB
 _MAX_ROTATION_SUFFIX = 1000
 
