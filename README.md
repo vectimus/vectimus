@@ -8,7 +8,7 @@ AI coding agents execute shell commands, write files, install packages and call 
 
 ## What Vectimus does
 
-Vectimus intercepts every action an AI agent takes and evaluates it against [Cedar](https://www.cedarpolicy.com/) policies before execution.  It returns allow, deny or escalate decisions in single-digit milliseconds.  It works across Claude Code, Cursor and GitHub Copilot through their native hook mechanisms.
+Vectimus intercepts every action an AI agent takes and evaluates it against [Cedar](https://www.cedarpolicy.com/) policies before execution.  It returns allow, deny or escalate decisions in single-digit milliseconds.  It works across Claude Code, Cursor, GitHub Copilot and Gemini CLI through their native hook mechanisms.
 
 ```
 ┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────┐
@@ -77,6 +77,7 @@ This strips Vectimus entries from your tool configs while preserving any non-Vec
 | Claude Code | HTTP hook or command hook | Supported |
 | Cursor | Command hook | Supported |
 | GitHub Copilot (VS Code) | Command hook | Supported |
+| Gemini CLI | Command hook | Supported |
 
 ## Example policy
 
