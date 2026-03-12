@@ -1,4 +1,9 @@
 """Framework-specific middleware and plugins.
 
-Future integrations (LangGraph, Google ADK, Azure, etc.) will land here.
+Available integrations:
+
+- **langgraph**: LangChain / LangGraph middleware and MCP interceptor.
+  Install with ``pip install vectimus[langgraph]``.
+
+Future integrations (Google ADK, Azure, etc.) will land here.
 """
