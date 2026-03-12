@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from vectimus.core.config import VectimusConfig
-from vectimus.core.loader import PolicyLoader, parse_rules_from_cedar
+from vectimus.engine.config import VectimusConfig
+from vectimus.engine.loader import PolicyLoader, parse_rules_from_cedar
 
 # ---------------------------------------------------------------------------
 # Fixtures

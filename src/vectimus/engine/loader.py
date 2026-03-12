@@ -14,7 +14,7 @@ from pathlib import Path
 
 import structlog
 
-from vectimus.core.config import VectimusConfig
+from vectimus.engine.config import VectimusConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -247,7 +247,11 @@ class PolicyLoader:
             own MCP configuration through.
         """
         if policy_dirs is None:
+            # Installed package: policies bundled at vectimus/policies/
             builtin = Path(__file__).resolve().parent.parent / "policies"
+            if not builtin.is_dir():
+                # Development (editable install): policies at repo root
+                builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
             external = Path.home() / ".vectimus" / "packs"
             self._policy_dirs = [builtin, external]
             if project_path is not None:

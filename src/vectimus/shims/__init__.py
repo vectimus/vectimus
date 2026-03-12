@@ -1,5 +1,5 @@
-"""Backwards-compatible re-export. Use vectimus.core.audit instead."""
+"""Backwards-compatible re-export. Use vectimus.engine.audit instead."""
 
-from vectimus.core.audit import write_audit
+from vectimus.engine.audit import write_audit
 
 __all__ = ["write_audit"]

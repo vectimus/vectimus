@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING, Any
 import cedarpy
 import structlog
 
-from vectimus.core.models import ActionType, Decision, DecisionVerdict, VectimusEvent
-from vectimus.core.schemas import CEDAR_SCHEMA_JSON
+from vectimus.engine.models import ActionType, Decision, DecisionVerdict, VectimusEvent
+from vectimus.engine.schemas import CEDAR_SCHEMA_JSON
 
 if TYPE_CHECKING:
-    from vectimus.core.loader import PolicyLoader
+    from vectimus.engine.loader import PolicyLoader
 
 logger = structlog.get_logger(__name__)
 
@@ -216,6 +216,11 @@ class PolicyEngine:
         elif self._policy_dir is None:
             # Use built-in policies shipped with the package.
             pkg_dir = Path(__file__).resolve().parent.parent / "policies" / "base"
+            if not pkg_dir.is_dir():
+                # Development (editable install): policies at repo root.
+                pkg_dir = (
+                    Path(__file__).resolve().parent.parent.parent.parent / "policies" / "base"
+                )
             self._load_from_dir(pkg_dir)
         else:
             self._load_from_dir(Path(self._policy_dir))

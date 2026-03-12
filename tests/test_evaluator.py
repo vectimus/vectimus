@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.models import ActionType, DecisionVerdict
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.models import ActionType, DecisionVerdict
 
 
 class TestCedarEvaluator:

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from vectimus.core.models import (
+from vectimus.engine.models import (
     ActionInfo,
     AuditRecord,
     ContextInfo,

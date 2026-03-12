@@ -16,17 +16,17 @@ from pathlib import Path
 
 import pytest
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import parse_rules_from_cedar
-from vectimus.core.models import ActionType, DecisionVerdict
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import parse_rules_from_cedar
+from vectimus.engine.models import ActionType, DecisionVerdict
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BASE_PACK_DIR = _PROJECT_ROOT / "src" / "vectimus" / "policies" / "base"
-OWASP_PACK_DIR = _PROJECT_ROOT / "src" / "vectimus" / "policies" / "owasp-agentic"
+BASE_PACK_DIR = _PROJECT_ROOT / "policies" / "base"
+OWASP_PACK_DIR = _PROJECT_ROOT / "policies" / "owasp-agentic"
 
 
 @pytest.fixture()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vectimus.core.models import (
+from vectimus.engine.models import (
     ActionInfo,
     ActionType,
     AuditRecord,

@@ -30,14 +30,16 @@ vectimus init                # Generate hook configs for detected AI tools
 ## Project layout
 
 ```
+policies/           # Cedar policy packs (base/, owasp-agentic/) — top-level for visibility
 src/vectimus/
-  core/           # Evaluator, normaliser, models, Cedar schema, config, loader
-  server/         # Optional FastAPI server (behind vectimus[server])
-  exporters/      # Audit log exporters (JSONL with file locking)
-  cli/            # Click CLI commands (init, hook, test, status, pack, rule, observe, mcp, server)
-  policies/       # Cedar policy packs (base/, owasp-agentic/)
-tests/            # pytest tests
-docs/             # Documentation
+  engine/           # Core evaluation: evaluator, normaliser, models, Cedar schema, config, loader
+  adapters/         # Thin hook translators for coding tools (Claude Code, Cursor, Copilot)
+  integrations/     # Framework middleware/plugins (LangGraph, ADK, etc. — placeholder)
+  server/           # Optional FastAPI server (behind vectimus[server])
+  exporters/        # Audit log exporters (JSONL with file locking)
+  cli/              # Click CLI commands (init, hook, test, status, pack, rule, observe, mcp, server)
+tests/              # pytest tests
+docs/               # Documentation
 ```
 
 ## CLI commands

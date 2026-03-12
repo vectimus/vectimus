@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from vectimus.core.models import AuditRecord
+from vectimus.engine.models import AuditRecord
 
 
 class BaseExporter(ABC):

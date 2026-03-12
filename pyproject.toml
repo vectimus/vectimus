@@ -60,6 +60,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/vectimus"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"policies" = "vectimus/policies"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/vectimus", "policies"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

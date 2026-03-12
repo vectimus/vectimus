@@ -6,8 +6,8 @@ closing the 32KB padding bypass vulnerability.
 
 from __future__ import annotations
 
-from vectimus.core.models import ActionType, DecisionVerdict
-from vectimus.core.normaliser import normalise
+from vectimus.engine.models import ActionType, DecisionVerdict
+from vectimus.engine.normaliser import normalise
 
 
 class TestLineBasedContentInspection:
@@ -91,7 +91,7 @@ class TestLineBasedContentInspection:
         """VECTIMUS_CONTENT_MAX_LINES env var overrides the default."""
         # This tests the module-level variable. Since it's read at import time,
         # we patch it directly on the normaliser module.
-        import vectimus.core.normaliser as mod
+        import vectimus.engine.normaliser as mod
 
         original = mod._CONTENT_INSPECTION_MAX_LINES
         try:

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 import tomli_w
 
-from vectimus.core.config import VectimusConfig, project_local_config_path
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.models import (
+from vectimus.engine.config import VectimusConfig, project_local_config_path
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.models import (
     ActionInfo,
     ActionType,
     ContextInfo,

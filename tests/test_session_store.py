@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from vectimus.core.session_store import SessionStore
+from vectimus.engine.session_store import SessionStore
 
 
 def test_record_increments_counts() -> None:

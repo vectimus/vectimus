@@ -6,9 +6,9 @@ import textwrap
 
 import pytest
 
-from vectimus.core.evaluator import PolicyEngine, _parse_policy_metadata
-from vectimus.core.loader import parse_rules_from_cedar
-from vectimus.core.models import DecisionVerdict
+from vectimus.engine.evaluator import PolicyEngine, _parse_policy_metadata
+from vectimus.engine.loader import parse_rules_from_cedar
+from vectimus.engine.models import DecisionVerdict
 
 # ---------------------------------------------------------------------------
 # Annotation parsing
@@ -224,7 +224,7 @@ class TestEnforcementConfigOverrides:
     """Config-based enforcement overrides work correctly."""
 
     def test_set_and_get_global_override(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -234,7 +234,7 @@ class TestEnforcementConfigOverrides:
         assert config.get_enforcement_override("test-001") == "escalate"
 
     def test_set_and_get_project_override(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -246,7 +246,7 @@ class TestEnforcementConfigOverrides:
         assert config.get_enforcement_override("test-001", project) == "observe"
 
     def test_project_override_wins_over_global(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -261,7 +261,7 @@ class TestEnforcementConfigOverrides:
         assert config.get_enforcement_override("test-001") == "escalate"
 
     def test_clear_override(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -274,7 +274,7 @@ class TestEnforcementConfigOverrides:
         assert config.get_enforcement_override("test-001") is None
 
     def test_effective_overrides_merged(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -291,7 +291,7 @@ class TestEnforcementConfigOverrides:
         assert effective["rule-b"] == "observe"  # global carries through
 
     def test_invalid_level_raises(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")
@@ -301,7 +301,7 @@ class TestEnforcementConfigOverrides:
             config.set_enforcement_override("test-001", "invalid")
 
     def test_no_override_returns_none(self, tmp_path):
-        from vectimus.core.config import VectimusConfig
+        from vectimus.engine.config import VectimusConfig
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("")

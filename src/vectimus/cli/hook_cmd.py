@@ -20,11 +20,11 @@ from pathlib import Path
 
 import click
 
-from vectimus.core.audit import write_audit
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import PolicyLoader
-from vectimus.core.models import DecisionVerdict
-from vectimus.core.normaliser import normalise
+from vectimus.engine.audit import write_audit
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import PolicyLoader
+from vectimus.engine.models import DecisionVerdict
+from vectimus.engine.normaliser import normalise
 
 VALID_SOURCES = ("claude-code", "cursor", "copilot")
 
@@ -171,7 +171,7 @@ def hook_cmd(source: str) -> None:
     project_path = _project_path_from_payload(source, payload)
 
     # Try server first (env var overrides config file)
-    from vectimus.core.config import VectimusConfig
+    from vectimus.engine.config import VectimusConfig
 
     config = VectimusConfig()
     server_url = config.get_server_url()

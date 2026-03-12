@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from vectimus.core.config import VectimusConfig
+from vectimus.engine.config import VectimusConfig
 
 
 @pytest.fixture()

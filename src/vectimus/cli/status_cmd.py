@@ -8,8 +8,8 @@ from pathlib import Path
 
 import click
 
-from vectimus.core.config import VectimusConfig, project_local_config_path
-from vectimus.core.loader import PolicyLoader
+from vectimus.engine.config import VectimusConfig, project_local_config_path
+from vectimus.engine.loader import PolicyLoader
 
 
 def _check_claude_code() -> str | None:

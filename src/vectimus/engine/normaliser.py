@@ -3,32 +3,29 @@
 Translates tool-specific JSON payloads (Claude Code, Cursor, Copilot) into
 canonical VectimusEvent objects.  New tools are added by registering a
 normaliser function with the @register decorator.
+
+Tool-specific normalisers live in ``vectimus.adapters`` and are loaded
+automatically when ``normalise()`` is first called.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from vectimus.core.enrichment import enrich
-from vectimus.core.models import (
-    ActionInfo,
+from vectimus.engine.enrichment import enrich
+from vectimus.engine.models import (
     ActionType,
-    ContextInfo,
     EventType,
-    IdentityInfo,
-    SourceInfo,
     VectimusEvent,
 )
 
 # ---------------------------------------------------------------------------
-# Tool name -> action type mappings
+# Tool name -> action type mappings (shared across adapters)
 # ---------------------------------------------------------------------------
 
 CLAUDE_CODE_TOOL_MAP: dict[str, str] = {
@@ -129,6 +126,7 @@ def _refine_shell_action(command: str) -> str:
 
 NormaliserFn = Callable[[dict[str, Any]], VectimusEvent]
 _REGISTRY: dict[str, NormaliserFn] = {}
+_ADAPTERS_LOADED = False
 
 
 def register(source_tool: str) -> Callable[[NormaliserFn], NormaliserFn]:
@@ -141,12 +139,22 @@ def register(source_tool: str) -> Callable[[NormaliserFn], NormaliserFn]:
     return wrapper
 
 
+def _ensure_adapters_loaded() -> None:
+    """Import adapter modules so their @register decorators execute."""
+    global _ADAPTERS_LOADED  # noqa: PLW0603
+    if not _ADAPTERS_LOADED:
+        import vectimus.adapters  # noqa: F401
+
+        _ADAPTERS_LOADED = True
+
+
 def normalise(raw_payload: dict[str, Any], source_tool: str) -> VectimusEvent:
     """Normalise a raw tool payload into a VectimusEvent.
 
     Looks up the registered normaliser for *source_tool* and delegates to it.
     Raises ValueError if no normaliser is registered.
     """
+    _ensure_adapters_loaded()
     fn = _REGISTRY.get(source_tool)
     if fn is None:
         raise ValueError(
@@ -158,7 +166,7 @@ def normalise(raw_payload: dict[str, Any], source_tool: str) -> VectimusEvent:
 
 
 # ---------------------------------------------------------------------------
-# Helper
+# Helpers (used by adapter modules)
 # ---------------------------------------------------------------------------
 
 
@@ -301,274 +309,3 @@ def _build_agent_message_command(tool_input: dict[str, Any]) -> str:
     if recipient := tool_input.get("recipient"):
         parts.append(f"recipient={recipient}")
     return " ".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Claude Code normaliser
-# ---------------------------------------------------------------------------
-
-
-@register("claude-code")
-def _normalise_claude_code(payload: dict[str, Any]) -> VectimusEvent:
-    """Normalise a Claude Code hook payload."""
-    tool_name: str = payload.get("tool_name", "unknown")
-    tool_input: dict[str, Any] = payload.get("tool_input", {})
-    hook_event: str = payload.get("hook_event_name", "PreToolUse")
-
-    # Determine action type
-    if tool_name.startswith("mcp__"):
-        action_type = ActionType.MCP_TOOL
-    else:
-        action_type = CLAUDE_CODE_TOOL_MAP.get(tool_name, ActionType.SHELL_COMMAND)
-
-    command = _extract_command(tool_input)
-
-    # Build synthetic commands for agent operations
-    if action_type == ActionType.AGENT_SPAWN and tool_name in ("Agent", "Task", "TeamCreate"):
-        command = _build_agent_spawn_command(tool_name, tool_input)
-    elif action_type == ActionType.AGENT_MESSAGE:
-        command = _build_agent_message_command(tool_input)
-
-    # Refine shell commands
-    if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
-
-    # MCP fields
-    mcp_server: str | None = None
-    mcp_tool: str | None = None
-    if tool_name.startswith("mcp__"):
-        parts = tool_name.split("__", 2)
-        if len(parts) >= 3:
-            mcp_server = parts[1]
-            mcp_tool = parts[2]
-        elif len(parts) == 2:
-            mcp_server = parts[1]
-
-    # Content inspection fields.
-    file_content: str | None = None
-    script_content: str | None = None
-
-    if action_type == ActionType.FILE_WRITE:
-        file_content = _extract_file_content(tool_input)
-    elif action_type == ActionType.SHELL_COMMAND and command:
-        script_content = _resolve_script_content(command, payload.get("cwd"))
-
-    return VectimusEvent(
-        event_id=payload.get("tool_use_id", str(uuid.uuid4())),
-        timestamp=_now_iso(),
-        event_type=_hook_event_to_event_type(hook_event),
-        source=SourceInfo(
-            tool="claude-code",
-            session_id=payload.get("session_id"),
-        ),
-        identity=IdentityInfo(
-            principal=payload.get("principal", "unknown"),
-        ),
-        action=ActionInfo(
-            action_type=action_type,
-            raw_tool_name=tool_name,
-            command=command,
-            file_path=_extract_file_path(tool_input),
-            url=_extract_url(tool_input),
-            mcp_server=mcp_server,
-            mcp_tool=mcp_tool,
-            file_content=file_content,
-            script_content=script_content,
-            raw_input=tool_input,
-        ),
-        context=ContextInfo(
-            cwd=payload.get("cwd"),
-        ),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Cursor normaliser
-# ---------------------------------------------------------------------------
-
-
-@register("cursor")
-def _normalise_cursor(payload: dict[str, Any]) -> VectimusEvent:
-    """Normalise a Cursor hook payload.
-
-    Handles two payload shapes:
-    - ``beforeShellExecution`` / ``afterFileEdit`` etc.: command at top level.
-    - ``preToolUse`` / ``postToolUse``: structured ``tool_name`` + ``tool_input``.
-    """
-    hook_event: str = payload.get("hook_event_name", "beforeShellExecution")
-
-    # preToolUse / postToolUse carry tool_name + tool_input (like Claude Code).
-    tool_name: str | None = payload.get("tool_name")
-    tool_input: dict[str, Any] = payload.get("tool_input", {})
-
-    if tool_name and hook_event.lower() in ("pretooluse", "posttooluse", "posttoolusefailure"):
-        # Structured tool event — resolve action type from tool name.
-        if tool_name.startswith("mcp__"):
-            action_type = ActionType.MCP_TOOL
-        else:
-            action_type = (
-                CURSOR_TOOL_MAP.get(tool_name)
-                or CLAUDE_CODE_TOOL_MAP.get(tool_name)
-                or ActionType.SHELL_COMMAND
-            )
-        command = _extract_command(tool_input)
-        file_path = _extract_file_path(tool_input)
-        raw_tool = tool_name
-    else:
-        # Legacy per-event hooks (beforeShellExecution, afterFileEdit, etc.).
-        action_type = CURSOR_EVENT_MAP.get(hook_event, ActionType.SHELL_COMMAND)
-        command = payload.get("command")
-        file_path = _extract_file_path(payload)
-        raw_tool = hook_event
-
-    if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
-
-    # MCP fields — extract server/tool from mcp__server__tool naming convention.
-    mcp_server: str | None = None
-    mcp_tool: str | None = None
-    if raw_tool.startswith("mcp__"):
-        parts = raw_tool.split("__", 2)
-        if len(parts) >= 3:
-            mcp_server = parts[1]
-            mcp_tool = parts[2]
-        elif len(parts) == 2:
-            mcp_server = parts[1]
-
-    cwd = payload.get("cwd")
-    workspace_roots: list[str] = payload.get("workspace_roots", [])
-    repository = workspace_roots[0] if workspace_roots else None
-
-    # Content inspection: extract file/script content for double evaluation.
-    file_content: str | None = None
-    script_content: str | None = None
-    effective_input = tool_input if tool_name else payload
-    if action_type == ActionType.FILE_WRITE:
-        file_content = _extract_file_content(effective_input)
-    elif action_type == ActionType.SHELL_COMMAND and command:
-        script_content = _resolve_script_content(command, cwd)
-
-    return VectimusEvent(
-        event_id=payload.get("generation_id", str(uuid.uuid4())),
-        timestamp=_now_iso(),
-        event_type=_hook_event_to_event_type(hook_event),
-        source=SourceInfo(
-            tool="cursor",
-            session_id=payload.get("conversation_id"),
-        ),
-        identity=IdentityInfo(
-            principal=payload.get("principal") or payload.get("user_email") or "unknown",
-        ),
-        action=ActionInfo(
-            action_type=action_type,
-            raw_tool_name=raw_tool,
-            command=command,
-            file_path=file_path,
-            mcp_server=mcp_server,
-            mcp_tool=mcp_tool,
-            file_content=file_content,
-            script_content=script_content,
-            raw_input=effective_input,
-        ),
-        context=ContextInfo(
-            cwd=cwd,
-            repository=repository,
-        ),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Copilot / VS Code normaliser
-# ---------------------------------------------------------------------------
-
-
-@register("copilot")
-def _normalise_copilot(payload: dict[str, Any]) -> VectimusEvent:
-    """Normalise a GitHub Copilot / VS Code hook payload.
-
-    Handles two payload formats:
-    - VS Code Copilot Agent: ``tool_name`` (snake_case), ``tool_input`` (dict)
-    - GitHub Copilot CLI: ``toolName`` (camelCase), ``toolArgs`` (JSON string)
-    """
-    # Accept both snake_case (VS Code) and camelCase (Copilot CLI) field names.
-    tool_name: str = payload.get("tool_name") or payload.get("toolName") or "unknown"
-
-    # VS Code sends tool_input as a dict; Copilot CLI sends toolArgs as a JSON string.
-    tool_input: dict[str, Any] | None = payload.get("tool_input")
-    if tool_input is None:
-        raw_args = payload.get("toolArgs")
-        if isinstance(raw_args, str):
-            try:
-                parsed = json.loads(raw_args)
-                tool_input = parsed if isinstance(parsed, dict) else {}
-            except (json.JSONDecodeError, TypeError):
-                tool_input = {}
-        elif isinstance(raw_args, dict):
-            tool_input = raw_args
-        else:
-            tool_input = {}
-
-    hook_event: str = payload.get("hookEventName", "PreToolUse")
-
-    # Look up action type: Copilot-specific names first, then Claude Code names,
-    # then fall back to SHELL_COMMAND.
-    if tool_name.startswith("mcp__"):
-        action_type = ActionType.MCP_TOOL
-    else:
-        action_type = (
-            COPILOT_TOOL_MAP.get(tool_name)
-            or CLAUDE_CODE_TOOL_MAP.get(tool_name)
-            or ActionType.SHELL_COMMAND
-        )
-
-    command = _extract_command(tool_input)
-    if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
-
-    # MCP fields — extract server/tool from mcp__server__tool naming convention.
-    mcp_server: str | None = None
-    mcp_tool: str | None = None
-    if tool_name.startswith("mcp__"):
-        parts = tool_name.split("__", 2)
-        if len(parts) >= 3:
-            mcp_server = parts[1]
-            mcp_tool = parts[2]
-        elif len(parts) == 2:
-            mcp_server = parts[1]
-
-    # Content inspection: extract file/script content for double evaluation.
-    cwd = payload.get("cwd")
-    file_content: str | None = None
-    script_content: str | None = None
-    if action_type == ActionType.FILE_WRITE:
-        file_content = _extract_file_content(tool_input)
-    elif action_type == ActionType.SHELL_COMMAND and command:
-        script_content = _resolve_script_content(command, cwd)
-
-    return VectimusEvent(
-        event_id=payload.get("tool_use_id", str(uuid.uuid4())),
-        timestamp=_now_iso(),
-        event_type=_hook_event_to_event_type(hook_event),
-        source=SourceInfo(
-            tool="copilot",
-            session_id=payload.get("sessionId"),
-        ),
-        identity=IdentityInfo(
-            principal=payload.get("principal", "unknown"),
-        ),
-        action=ActionInfo(
-            action_type=action_type,
-            raw_tool_name=tool_name,
-            command=command,
-            file_path=_extract_file_path(tool_input),
-            url=_extract_url(tool_input),
-            mcp_server=mcp_server,
-            mcp_tool=mcp_tool,
-            file_content=file_content,
-            script_content=script_content,
-            raw_input=tool_input,
-        ),
-        context=ContextInfo(
-            cwd=cwd,
-        ),
-    )

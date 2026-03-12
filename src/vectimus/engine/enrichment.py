@@ -13,7 +13,7 @@ import subprocess
 from functools import lru_cache
 
 import vectimus
-from vectimus.core.models import VectimusEvent
+from vectimus.engine.models import VectimusEvent
 
 _GIT_TIMEOUT = int(os.environ.get("VECTIMUS_GIT_TIMEOUT", "5"))
 

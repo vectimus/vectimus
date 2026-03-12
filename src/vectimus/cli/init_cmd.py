@@ -10,8 +10,8 @@ import click
 
 from vectimus.cli.detect import ToolName, detect_all
 from vectimus.cli.mcp_discover import discover_mcp_servers
-from vectimus.core.config import VectimusConfig
-from vectimus.core.loader import PolicyLoader
+from vectimus.engine.config import VectimusConfig
+from vectimus.engine.loader import PolicyLoader
 
 # Maps tool names to display labels and configure functions.
 _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
