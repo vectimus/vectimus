@@ -77,6 +77,58 @@ This strips Vectimus entries from your tool configs while preserving any non-Vec
 | Claude Code | HTTP hook or command hook | Supported |
 | Cursor | Command hook | Supported |
 | GitHub Copilot (VS Code) | Command hook | Supported |
+| LangChain / LangGraph | Middleware + MCP interceptor | Supported |
+
+## LangGraph / LangChain integration
+
+Vectimus can govern tool calls made by LangChain agents and LangGraph workflows.  The same Cedar policies that block `rm -rf` in a coding agent will block dangerous tool calls in a LangGraph customer support bot, a RAG pipeline or a multi-agent system.
+
+Install with the langgraph extras:
+
+```bash
+pip install vectimus[langgraph]
+```
+
+### Agent middleware
+
+Use `VectimusMiddleware` with `create_agent()` to evaluate every tool call against Cedar policies:
+
+```python
+from vectimus.integrations.langgraph import VectimusMiddleware
+
+middleware = VectimusMiddleware(
+    policy_dir="./policies",   # Optional, defaults to bundled policies
+    observe_mode=False,        # Optional, defaults to False
+)
+
+agent = create_agent(
+    model="openai:gpt-4.1",
+    tools=my_tools,
+    middleware=[middleware],
+)
+```
+
+When a tool call is denied, the agent receives a clear message like `"Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."` and can try a different approach.
+
+### MCP interceptor
+
+For MCP tool calls via `MultiServerMCPClient`, use `create_interceptor`:
+
+```python
+from vectimus.integrations.langgraph import create_interceptor
+
+interceptor = create_interceptor(
+    policy_dir="./policies",
+    observe_mode=False,
+)
+
+client = MultiServerMCPClient(
+    {...},
+    tool_interceptors=[interceptor],
+)
+```
+
+Both mechanisms support observe mode — log what would be blocked without actually blocking, so you can trial Vectimus in your pipelines before switching to enforcement.
 
 ## Example policy
 
