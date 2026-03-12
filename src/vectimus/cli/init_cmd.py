@@ -256,9 +256,19 @@ def _configure_copilot() -> None:
         raise SystemExit(1)
 
 
-def _is_vectimus_gemini_hook(hook: dict) -> bool:
-    """Check if a Gemini CLI hook entry was created by Vectimus."""
-    return "vectimus" in hook.get("command", "")
+def _is_vectimus_gemini_hook(entry: dict) -> bool:
+    """Check if a Gemini CLI hook entry was created by Vectimus.
+
+    Gemini CLI uses a nested format: each BeforeTool entry has a ``matcher``
+    and a ``hooks`` array of hook definitions.  We check both the nested
+    format and the legacy flat format for backwards compatibility.
+    """
+    # Nested format (correct): {"matcher": ".*", "hooks": [{"command": "...vectimus..."}]}
+    for hook in entry.get("hooks", []):
+        if "vectimus" in hook.get("command", ""):
+            return True
+    # Legacy flat format: {"command": "...vectimus...", "matcher": ".*"}
+    return "vectimus" in entry.get("command", "")
 
 
 def _configure_gemini_cli() -> None:
@@ -279,9 +289,18 @@ def _configure_gemini_cli() -> None:
     settings.setdefault("hooks", {})
     existing_hooks: list[dict] = settings["hooks"].get("BeforeTool", [])
 
-    # Merge: remove any previous Vectimus hooks, then prepend ours.
+    # Merge: remove any previous Vectimus hooks (nested or legacy), then prepend ours.
     cleaned = [h for h in existing_hooks if not _is_vectimus_gemini_hook(h)]
-    cleaned.insert(0, {"command": command, "matcher": ".*"})
+    vectimus_entry = {
+        "matcher": ".*",
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+            }
+        ],
+    }
+    cleaned.insert(0, vectimus_entry)
     settings["hooks"]["BeforeTool"] = cleaned
 
     try:
