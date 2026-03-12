@@ -531,7 +531,7 @@ class VectimusConfig:
         if env:
             return env
         data = self.effective_config(project_path) if project_path else self._data
-        default = str(Path.home() / ".vectimus")
+        default = str(Path.home() / ".vectimus" / "logs")
         return data.get("audit", {}).get("log_dir", default)
 
     def get_log_dir(self) -> str:
