@@ -15,7 +15,7 @@ from vectimus.engine.loader import PolicyLoader
 
 # Maps tool names to display labels and configure functions.
 _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
-    ToolName.CLAUDE_CODE: ("Claude Code", "_configure_claude_code"),
+    ToolName.CLAUDE_CODE: ("Claude Code / Agent SDK", "_configure_claude_code"),
     ToolName.CURSOR: ("Cursor", "_configure_cursor"),
     ToolName.COPILOT: ("VS Code / Copilot", "_configure_copilot"),
     ToolName.GEMINI_CLI: ("Gemini CLI", "_configure_gemini_cli"),

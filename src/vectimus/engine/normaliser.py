@@ -170,6 +170,11 @@ def normalise(raw_payload: dict[str, Any], source_tool: str) -> VectimusEvent:
             f"Registered tools: {sorted(_REGISTRY)}"
         )
     event = fn(raw_payload)
+    # Ensure the source tool matches what the caller specified, not what the
+    # adapter hardcodes.  This matters when multiple source names share the
+    # same normaliser (e.g. "claude-agent-sdk" reuses the Claude Code adapter).
+    if event.source.tool != source_tool:
+        event.source.tool = source_tool
     return enrich(event)
 
 
