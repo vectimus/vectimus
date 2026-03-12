@@ -1,38 +1,50 @@
-"""LangChain / LangGraph middleware integration for Vectimus.
+"""Google Agent Development Kit (ADK) plugin integration for Vectimus.
 
-Provides two mechanisms for governing tool calls in LangChain agents
-and LangGraph workflows:
+Provides two mechanisms for governing tool calls in Google ADK agents:
 
-1. ``VectimusMiddleware`` — a callable that wraps tool execution via
-   LangGraph's ``ToolNode(awrap_tool_call=...)`` interface.
-2. ``create_interceptor`` — factory that returns an MCP tool call interceptor
-   for use with ``MultiServerMCPClient(tool_interceptors=[...])``.
+1. ``VectimusADKPlugin`` — for use with ``Runner(plugins=[...])``.
+   Applies governance globally to every agent, tool and LLM call managed
+   by that runner.  This is the recommended approach.
+2. ``create_before_tool_callback`` — factory that returns a callback for
+   per-agent use with ``LlmAgent(before_tool_callback=...)``.
 
 Both share the same evaluation pipeline: normalise the tool call to a
 VectimusEvent, evaluate against Cedar policies, log to the audit trail,
 and allow or block accordingly.
 
-Usage::
+Usage (plugin)::
 
-    from vectimus.integrations.langgraph import VectimusMiddleware
-    from langgraph.prebuilt import create_react_agent
-    from langgraph.prebuilt.tool_node import ToolNode
+    from vectimus.integrations.adk import VectimusADKPlugin
 
-    middleware = VectimusMiddleware(observe_mode=False)
-    tool_node = ToolNode(tools, awrap_tool_call=middleware)
-    agent = create_react_agent(model=model, tools=tool_node)
+    plugin = VectimusADKPlugin(
+        policy_dir="./policies",
+        observe_mode=False,
+    )
+    runner = Runner(
+        agent=my_agent,
+        app_name="my-app",
+        session_service=session_service,
+        plugins=[plugin],
+    )
 
-For MCP interceptors::
+Usage (per-agent callback)::
 
-    from vectimus.integrations.langgraph import create_interceptor
+    from vectimus.integrations.adk import create_before_tool_callback
 
-    interceptor = create_interceptor(policy_dir="./policies")
-    client = MultiServerMCPClient({...}, tool_interceptors=[interceptor])
+    callback = create_before_tool_callback(
+        policy_dir="./policies",
+        observe_mode=False,
+    )
+    agent = LlmAgent(
+        name="MyAgent",
+        model="gemini-2.0-flash",
+        before_tool_callback=callback,
+    )
 
-Dependencies (``langchain``, ``langgraph``) are guarded behind lazy checks
-so that ``import vectimus`` works without them installed.  An
-``ImportError`` with install instructions is raised only when the user
-tries to instantiate the middleware or call the interceptor factory.
+Dependencies (``google-adk``) are guarded behind lazy checks so that
+``import vectimus`` works without them installed.  An ``ImportError``
+with install instructions is raised only when the user tries to
+instantiate the plugin or call the callback factory.
 """
 
 from __future__ import annotations
@@ -64,15 +76,15 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _INSTALL_MSG = (
-    "LangChain is required for the Vectimus LangGraph integration. "
-    "Install it with: pip install vectimus[langgraph]"
+    "Google ADK is required for the Vectimus ADK integration. "
+    "Install it with: pip install vectimus[adk]"
 )
 
 
-def _check_langchain_installed() -> None:
-    """Raise ImportError with a helpful message if langchain is missing."""
+def _check_adk_installed() -> None:
+    """Raise ImportError with a helpful message if google-adk is missing."""
     try:
-        import langchain  # noqa: F401
+        import google.adk  # noqa: F401
     except ImportError:
         raise ImportError(_INSTALL_MSG) from None
 
@@ -81,14 +93,16 @@ def _check_langchain_installed() -> None:
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-# Map well-known LangChain tool names to Vectimus action types.
+# Map well-known ADK / Gemini tool names to Vectimus action types.
 _TOOL_NAME_ACTION_MAP: dict[str, str] = {
     "bash": ActionType.SHELL_COMMAND,
     "shell": ActionType.SHELL_COMMAND,
     "terminal": ActionType.SHELL_COMMAND,
     "python_repl": ActionType.SHELL_COMMAND,
+    "code_execution": ActionType.SHELL_COMMAND,
     "file_write": ActionType.FILE_WRITE,
     "file_read": ActionType.FILE_READ,
+    "google_search": ActionType.WEB_REQUEST,
     "web_search": ActionType.WEB_REQUEST,
     "requests_get": ActionType.WEB_REQUEST,
     "requests_post": ActionType.WEB_REQUEST,
@@ -96,14 +110,14 @@ _TOOL_NAME_ACTION_MAP: dict[str, str] = {
 
 
 def _infer_action_type(tool_name: str, tool_args: dict[str, Any]) -> str:
-    """Infer a Vectimus action type from a LangChain tool name and args."""
+    """Infer a Vectimus action type from an ADK tool name and args."""
     lower = tool_name.lower()
 
     # Direct match
     if lower in _TOOL_NAME_ACTION_MAP:
         base = _TOOL_NAME_ACTION_MAP[lower]
     elif "__" in tool_name:
-        # MCP tool pattern: server__tool — check before keyword heuristics
+        # MCP tool pattern: server__tool
         base = ActionType.MCP_TOOL
     elif "shell" in lower or "bash" in lower or "terminal" in lower:
         base = ActionType.SHELL_COMMAND
@@ -140,10 +154,10 @@ def _build_event(
     tool_name: str,
     tool_args: dict[str, Any],
     *,
-    principal: str = "langgraph-agent",
+    principal: str = "adk-agent",
     cwd: str | None = None,
 ) -> VectimusEvent:
-    """Build a VectimusEvent from a LangChain/LangGraph tool call."""
+    """Build a VectimusEvent from a Google ADK tool call."""
     action_type = _infer_action_type(tool_name, tool_args)
     mcp_server, mcp_tool = _extract_mcp_parts(tool_name)
 
@@ -167,7 +181,7 @@ def _build_event(
         event_id=str(uuid.uuid4()),
         timestamp=datetime.now(UTC).isoformat(),
         event_type=EventType.PRE_ACTION,
-        source=SourceInfo(tool="langgraph"),
+        source=SourceInfo(tool="adk"),
         identity=IdentityInfo(principal=principal, identity_type="agent"),
         action=ActionInfo(
             action_type=action_type,
@@ -184,31 +198,42 @@ def _build_event(
     )
 
 
-def _format_denial(policy_ids: list[str], reason: str | None) -> str:
-    """Format a human-readable denial message for the agent."""
+def _format_denial(policy_ids: list[str], reason: str | None) -> dict[str, str]:
+    """Format a denial as a dict that ADK treats as the tool result.
+
+    Returning a dict from before_tool_callback skips tool execution and
+    feeds this dict back to the agent as the tool's output.
+    """
     if reason:
-        return f"Blocked by Vectimus: {reason}"
-    return f"Blocked by Vectimus policy {', '.join(policy_ids)}."
+        return {"error": f"Blocked by Vectimus: {reason}"}
+    return {"error": f"Blocked by Vectimus policy {', '.join(policy_ids)}."}
 
 
 # ---------------------------------------------------------------------------
-# VectimusMiddleware — for ToolNode(awrap_tool_call=...)
+# VectimusADKPlugin — for Runner(plugins=[...])
 # ---------------------------------------------------------------------------
 
 
-class VectimusMiddleware:
-    """Callable that evaluates LangGraph tool calls against Cedar policies.
+class VectimusADKPlugin:
+    """Google ADK plugin that evaluates tool calls against Cedar policies.
 
-    Designed for use with LangGraph's ``ToolNode`` as an async tool call
-    wrapper.  Pass the instance directly as ``awrap_tool_call``::
+    This is the recommended way to add Vectimus governance to ADK agents.
+    Register it on the Runner to apply policies globally across all agents.
 
-        from vectimus.integrations.langgraph import VectimusMiddleware
-        from langgraph.prebuilt import create_react_agent
-        from langgraph.prebuilt.tool_node import ToolNode
+    Usage::
 
-        middleware = VectimusMiddleware(observe_mode=False)
-        tool_node = ToolNode(tools, awrap_tool_call=middleware)
-        agent = create_react_agent(model=model, tools=tool_node)
+        from vectimus.integrations.adk import VectimusADKPlugin
+
+        plugin = VectimusADKPlugin(
+            policy_dir="./policies",
+            observe_mode=False,
+        )
+        runner = Runner(
+            agent=my_agent,
+            app_name="my-app",
+            session_service=session_service,
+            plugins=[plugin],
+        )
 
     Parameters
     ----------
@@ -219,43 +244,41 @@ class VectimusMiddleware:
         When True, denied actions are logged but not blocked (the tool call
         proceeds).  Useful for trialling Vectimus without enforcement.
     principal:
-        Identity string for the agent.  Defaults to ``"langgraph-agent"``.
+        Identity string for the agent.  Defaults to ``"adk-agent"``.
     cwd:
         Working directory context for policy evaluation.
     log_dir:
         Directory for audit log JSONL files.  Defaults to ``~/.vectimus/logs``.
-    loader:
-        Optional PolicyLoader for custom pack discovery.  Takes precedence
-        over *policy_dir* when provided.
     """
 
     def __init__(
         self,
         policy_dir: str | None = None,
         observe_mode: bool = False,
-        principal: str = "langgraph-agent",
+        principal: str = "adk-agent",
         cwd: str | None = None,
         log_dir: str | None = None,
-        loader: Any | None = None,
+        loader: PolicyLoader | None = None,
     ) -> None:
-        _check_langchain_installed()
+        _check_adk_installed()
         self._engine = PolicyEngine(policy_dir=policy_dir, loader=loader, observe=observe_mode)
         self._observe = observe_mode
         self._principal = principal
         self._cwd = cwd
         self._log_dir = log_dir
 
-    async def __call__(self, request: Any, execute: Callable[..., Any]) -> Any:
-        """Evaluate a tool call request and either allow or block it.
+    def before_tool_callback(
+        self,
+        callback_context: Any,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> dict[str, str] | None:
+        """Evaluate a tool call against Cedar policies before execution.
 
-        Compatible with LangGraph's ``ToolNode(awrap_tool_call=...)``
-        interface.  *request* is a ``ToolCallRequest`` with a
-        ``.tool_call`` dict containing ``name``, ``args`` and ``id``.
-        *execute* is the async callable that runs the tool.
+        Returns a dict to block the tool (the dict becomes the tool result
+        the agent sees).  Returns None to allow the tool to execute.
         """
-        tool_call = request.tool_call
-        tool_name = tool_call["name"]
-        tool_args = tool_call.get("args", {})
+        tool_args = args if isinstance(args, dict) else {}
 
         event = _build_event(
             tool_name,
@@ -268,46 +291,81 @@ class VectimusMiddleware:
         write_audit(event, decision, log_dir=self._log_dir)
 
         if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
-            # In observe mode the engine already downgrades DENY/ESCALATE
-            # to ALLOW, so reaching here means enforcement is active.
-            from langchain_core.messages import ToolMessage
+            return _format_denial(decision.matched_policy_ids, decision.reason)
 
-            return ToolMessage(
-                content=_format_denial(decision.matched_policy_ids, decision.reason),
-                tool_call_id=tool_call["id"],
-                name=tool_name,
-            )
+        return None
 
-        return await execute(request)
+    def after_tool_callback(
+        self,
+        callback_context: Any,
+        tool_name: str,
+        args: dict[str, Any],
+        result: Any,
+    ) -> None:
+        """Log tool execution results to the audit trail.
+
+        Always returns None (pass through) — results are not modified.
+        """
+        tool_args = args if isinstance(args, dict) else {}
+
+        event = VectimusEvent(
+            event_id=str(uuid.uuid4()),
+            timestamp=datetime.now(UTC).isoformat(),
+            event_type=EventType.POST_ACTION,
+            source=SourceInfo(tool="adk"),
+            identity=IdentityInfo(principal=self._principal, identity_type="agent"),
+            action=ActionInfo(
+                action_type=_infer_action_type(tool_name, tool_args),
+                raw_tool_name=tool_name,
+                raw_input=tool_args,
+            ),
+            context=ContextInfo(cwd=self._cwd),
+        )
+
+        # Build a lightweight post-action decision for audit logging.
+        from vectimus.engine.models import Decision
+
+        post_decision = Decision(
+            decision=DecisionVerdict.ALLOW,
+            matched_policy_ids=[],
+            reason="post-action audit",
+        )
+        write_audit(event, post_decision, log_dir=self._log_dir)
+
+        return None
 
 
 # ---------------------------------------------------------------------------
-# MCP interceptor — for MultiServerMCPClient(tool_interceptors=[...])
+# Per-agent callback factory
 # ---------------------------------------------------------------------------
 
 
-def create_interceptor(
+def create_before_tool_callback(
     policy_dir: str | None = None,
     observe_mode: bool = False,
-    principal: str = "langgraph-agent",
+    principal: str = "adk-agent",
     cwd: str | None = None,
     log_dir: str | None = None,
     loader: PolicyLoader | None = None,
-) -> Callable[..., Any]:
-    """Create a Vectimus MCP tool call interceptor.
+) -> Callable[..., dict[str, str] | None]:
+    """Create a Vectimus before_tool_callback for a single ADK agent.
 
-    Returns an async function compatible with LangChain's
-    ``MultiServerMCPClient(tool_interceptors=[...])`` interface.
+    Returns a callback function compatible with
+    ``LlmAgent(before_tool_callback=...)``.
 
     Usage::
 
-        from vectimus.integrations.langgraph import create_interceptor
+        from vectimus.integrations.adk import create_before_tool_callback
 
-        interceptor = create_interceptor(
+        callback = create_before_tool_callback(
             policy_dir="./policies",
             observe_mode=False,
         )
-        client = MultiServerMCPClient({...}, tool_interceptors=[interceptor])
+        agent = LlmAgent(
+            name="MyAgent",
+            model="gemini-2.0-flash",
+            before_tool_callback=callback,
+        )
 
     Parameters
     ----------
@@ -317,26 +375,22 @@ def create_interceptor(
     observe_mode:
         When True, denied actions are logged but not blocked.
     principal:
-        Identity string for the agent.  Defaults to ``"langgraph-agent"``.
+        Identity string for the agent.  Defaults to ``"adk-agent"``.
     cwd:
         Working directory context for policy evaluation.
     log_dir:
         Directory for audit log JSONL files.
     """
-    _check_langchain_installed()
+    _check_adk_installed()
     engine = PolicyEngine(policy_dir=policy_dir, loader=loader, observe=observe_mode)
 
-    async def interceptor(request: Any, handler: Callable[..., Any]) -> Any:
-        """Evaluate an MCP tool call request against Cedar policies."""
-        # Extract tool name and args from the request object.
-        # MCPToolCallRequest has .name and .args attributes.
-        tool_name = getattr(request, "name", str(request))
-        tool_args = getattr(request, "args", {}) or {}
-        if isinstance(tool_args, str):
-            try:
-                tool_args = json.loads(tool_args)
-            except (json.JSONDecodeError, TypeError):
-                tool_args = {"input": tool_args}
+    def before_tool_callback(
+        callback_context: Any,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> dict[str, str] | None:
+        """Evaluate a tool call against Cedar policies before execution."""
+        tool_args = args if isinstance(args, dict) else {}
 
         event = _build_event(
             tool_name,
@@ -351,19 +405,6 @@ def create_interceptor(
         if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
             return _format_denial(decision.matched_policy_ids, decision.reason)
 
-        return await handler(request)
+        return None
 
-    return interceptor
-
-
-# Convenience alias for simple usage without the factory.
-vectimus_interceptor: Callable[..., Any] | None = None
-"""Pre-built interceptor with default settings.
-
-For customisation use :func:`create_interceptor` instead.  This is set
-to ``None`` and must be created by the user because it requires
-LangChain to be installed::
-
-    from vectimus.integrations.langgraph import create_interceptor
-    interceptor = create_interceptor()
-"""
+    return before_tool_callback

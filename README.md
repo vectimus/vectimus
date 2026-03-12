@@ -79,6 +79,7 @@ This strips Vectimus entries from your tool configs while preserving any non-Vec
 | GitHub Copilot (VS Code) | Command hook | Supported |
 | Gemini CLI | Command hook | Supported |
 | LangChain / LangGraph | Middleware + MCP interceptor | Supported |
+| Google ADK | Plugin + per-agent callback | Supported |
 
 ## LangGraph / LangChain integration
 
@@ -130,6 +131,59 @@ client = MultiServerMCPClient(
 ```
 
 Both mechanisms support observe mode — log what would be blocked without actually blocking, so you can trial Vectimus in your pipelines before switching to enforcement.
+
+## Google ADK integration
+
+Vectimus governs tool calls in Google Agent Development Kit agents. The same Cedar policies apply whether your agent runs on Gemini, GPT-4o or Claude via LiteLLM.
+
+Install with the adk extras:
+
+```bash
+pip install vectimus[adk]
+```
+
+### Runner plugin (recommended)
+
+Use `VectimusADKPlugin` with `Runner(plugins=[...])` to apply governance globally across all agents managed by that runner:
+
+```python
+from vectimus.integrations.adk import VectimusADKPlugin
+
+plugin = VectimusADKPlugin(
+    policy_dir="./policies",   # Optional, defaults to bundled policies
+    observe_mode=False,        # Optional, defaults to False
+)
+
+runner = Runner(
+    agent=my_agent,
+    app_name="my-app",
+    session_service=session_service,
+    plugins=[plugin],
+)
+```
+
+When a tool call is denied, the agent receives a dict like `{"error": "Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."}` and can try a different approach.
+
+### Per-agent callback
+
+For governing a single agent without a plugin, use `create_before_tool_callback`:
+
+```python
+from vectimus.integrations.adk import create_before_tool_callback
+
+callback = create_before_tool_callback(
+    policy_dir="./policies",
+    observe_mode=False,
+)
+
+agent = LlmAgent(
+    name="MyAgent",
+    model="gemini-2.0-flash",
+    before_tool_callback=callback,
+)
+```
+
+The plugin approach is recommended over callbacks for consistent governance across all agents in a runner. Both support observe mode for trialling without enforcement.
 
 ## Example policy
 

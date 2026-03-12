@@ -5,6 +5,14 @@ All notable changes to Vectimus will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Google ADK integration: `VectimusADKPlugin` for `Runner(plugins=[...])` and `create_before_tool_callback` for per-agent callbacks
+- `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
+- `pip install vectimus[all]` extras group installs all integration dependencies
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
