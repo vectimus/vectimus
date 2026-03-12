@@ -4,6 +4,6 @@ Available integrations:
 
 - **langgraph**: LangChain / LangGraph middleware and MCP interceptor.
   Install with ``pip install vectimus[langgraph]``.
-
-Future integrations (Google ADK, Azure, etc.) will land here.
+- **adk**: Google Agent Development Kit (ADK) plugin and callbacks.
+  Install with ``pip install vectimus[adk]``.
 """

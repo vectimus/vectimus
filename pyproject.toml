@@ -42,6 +42,14 @@ langgraph = [
     "langchain>=0.3",
     "langgraph>=0.2",
 ]
+adk = [
+    "google-adk>=1.0.0",
+]
+all = [
+    "langchain>=0.3",
+    "langgraph>=0.2",
+    "google-adk>=1.0.0",
+]
 
 [dependency-groups]
 dev = [
