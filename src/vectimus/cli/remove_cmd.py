@@ -222,6 +222,14 @@ def _remove_copilot(hook_path: Path) -> None:
         parent.rmdir()
 
 
+def _is_vectimus_gemini_entry(entry: dict) -> bool:
+    """Check if a BeforeTool entry was created by Vectimus (nested or legacy)."""
+    for hook in entry.get("hooks", []):
+        if "vectimus" in hook.get("command", ""):
+            return True
+    return "vectimus" in entry.get("command", "")
+
+
 def _has_vectimus_hooks_gemini(settings_path: Path) -> bool:
     """Check if a Gemini CLI settings.json has Vectimus hooks."""
     try:
@@ -230,7 +238,7 @@ def _has_vectimus_hooks_gemini(settings_path: Path) -> bool:
         return False
 
     hooks = settings.get("hooks", {}).get("BeforeTool", [])
-    return any("vectimus" in h.get("command", "") for h in hooks)
+    return any(_is_vectimus_gemini_entry(h) for h in hooks)
 
 
 def _remove_gemini_cli(settings_path: Path) -> None:
@@ -241,7 +249,7 @@ def _remove_gemini_cli(settings_path: Path) -> None:
         return
 
     hooks = settings.get("hooks", {}).get("BeforeTool", [])
-    cleaned = [h for h in hooks if "vectimus" not in h.get("command", "")]
+    cleaned = [h for h in hooks if not _is_vectimus_gemini_entry(h)]
 
     if cleaned:
         settings["hooks"]["BeforeTool"] = cleaned

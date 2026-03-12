@@ -169,6 +169,18 @@ def _run_hook(source: str, payload: dict | str | None = None) -> tuple[int, str]
     return result.exit_code, result.output
 
 
+def _parse_json_output(output: str) -> dict:
+    """Extract the JSON object from mixed stdout/stderr CliRunner output."""
+    for line in output.strip().split(chr(10)):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    raise ValueError(f"No JSON found in output: {output!r}")
+
+
 class TestGeminiCLIHookCommand:
     """Tests for the hook command with --source gemini-cli."""
 
@@ -181,8 +193,11 @@ class TestGeminiCLIHookCommand:
         assert exit_code == 0
 
     def test_invalid_json_denies(self) -> None:
+        """Invalid JSON causes fail-closed; for gemini-cli this exits 0 with deny JSON."""
         exit_code, output = _run_hook("gemini-cli", "not json")
-        assert exit_code == 2
+        assert exit_code == 0
+        parsed = _parse_json_output(output)
+        assert parsed["decision"] == "deny"
 
     def test_safe_command_allows(self) -> None:
         payload = {
@@ -202,7 +217,10 @@ class TestGeminiCLIHookCommand:
             "cwd": str(tmp_path),
         }
         exit_code, output = _run_hook("gemini-cli", payload)
-        assert exit_code == 2
+        # Gemini CLI deny uses exit 0 with JSON decision.
+        assert exit_code == 0
+        parsed = _parse_json_output(output)
+        assert parsed["decision"] == "deny"
 
     def test_safe_file_read_allows(self) -> None:
         payload = {
@@ -215,10 +233,10 @@ class TestGeminiCLIHookCommand:
 
 
 class TestGeminiCLIDenyFormat:
-    """Verify Gemini CLI deny output goes to stderr (not stdout JSON)."""
+    """Verify Gemini CLI deny output is JSON on stdout with exit 0."""
 
-    def test_deny_reason_on_stderr(self, tmp_path, monkeypatch) -> None:
-        """Gemini CLI deny should put reason on stderr, not JSON on stdout."""
+    def test_deny_json_on_stdout(self, tmp_path, monkeypatch) -> None:
+        """Gemini CLI deny should output JSON on stdout and exit 0."""
         monkeypatch.chdir(tmp_path)
         payload = {
             "tool_name": "run_shell_command",
@@ -227,9 +245,11 @@ class TestGeminiCLIDenyFormat:
             "cwd": str(tmp_path),
         }
         exit_code, output = _run_hook("gemini-cli", payload)
-        assert exit_code == 2
-        # CliRunner mixes stderr into output. The output should NOT contain
-        # Claude Code style JSON keys like permissionDecision.
+        assert exit_code == 0
+        parsed = _parse_json_output(output)
+        assert parsed["decision"] == "deny"
+        assert "reason" in parsed
+        # Should NOT contain Claude Code style JSON keys.
         assert "permissionDecision" not in output
         assert "hookEventName" not in output
 
@@ -254,8 +274,10 @@ class TestGeminiCLIDenyFormat:
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("gemini-cli", payload)
 
-        assert exit_code == 2
-        assert "escalate" in output.lower()
+        assert exit_code == 0
+        parsed = _parse_json_output(output)
+        assert parsed["decision"] == "deny"
+        assert "escalate" in parsed["reason"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +373,15 @@ class TestConfigureGeminiCLI:
         settings = json.loads(settings_path.read_text())
         assert "hooks" in settings
         assert "BeforeTool" in settings["hooks"]
-        hooks = settings["hooks"]["BeforeTool"]
-        assert len(hooks) >= 1
-        assert "vectimus" in hooks[0]["command"]
-        assert hooks[0]["matcher"] == ".*"
+        entries = settings["hooks"]["BeforeTool"]
+        assert len(entries) >= 1
+        entry = entries[0]
+        assert entry["matcher"] == ".*"
+        assert "hooks" in entry
+        assert len(entry["hooks"]) == 1
+        hook = entry["hooks"][0]
+        assert hook["type"] == "command"
+        assert "vectimus" in hook["command"]
 
     def test_preserves_existing_non_vectimus_hooks(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -365,20 +392,16 @@ class TestConfigureGeminiCLI:
         gemini_dir = tmp_path / ".gemini"
         gemini_dir.mkdir()
         existing = {
-            "hooks": {
-                "BeforeTool": [
-                    {"command": "my-custom-hook", "matcher": "write_file"}
-                ]
-            }
+            "hooks": {"BeforeTool": [{"command": "my-custom-hook", "matcher": "write_file"}]}
         }
         (gemini_dir / "settings.json").write_text(json.dumps(existing))
 
         _configure_gemini_cli()
         settings = json.loads((gemini_dir / "settings.json").read_text())
-        hooks = settings["hooks"]["BeforeTool"]
-        assert len(hooks) == 2
-        assert "vectimus" in hooks[0]["command"]
-        assert hooks[1]["command"] == "my-custom-hook"
+        entries = settings["hooks"]["BeforeTool"]
+        assert len(entries) == 2
+        assert "vectimus" in entries[0]["hooks"][0]["command"]
+        assert entries[1]["command"] == "my-custom-hook"
 
     def test_replaces_existing_vectimus_hooks(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -388,6 +411,7 @@ class TestConfigureGeminiCLI:
 
         gemini_dir = tmp_path / ".gemini"
         gemini_dir.mkdir()
+        # Legacy flat format should still be detected and replaced.
         existing = {
             "hooks": {
                 "BeforeTool": [
@@ -399,9 +423,37 @@ class TestConfigureGeminiCLI:
 
         _configure_gemini_cli()
         settings = json.loads((gemini_dir / "settings.json").read_text())
-        hooks = settings["hooks"]["BeforeTool"]
-        assert len(hooks) == 1
-        assert "vectimus" in hooks[0]["command"]
+        entries = settings["hooks"]["BeforeTool"]
+        assert len(entries) == 1
+        assert "vectimus" in entries[0]["hooks"][0]["command"]
+
+    def test_replaces_existing_nested_vectimus_hooks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        from vectimus.cli.init_cmd import _configure_gemini_cli
+
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        existing = {
+            "hooks": {
+                "BeforeTool": [
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "old-vectimus hook --source gemini-cli"}
+                        ],
+                    }
+                ]
+            }
+        }
+        (gemini_dir / "settings.json").write_text(json.dumps(existing))
+
+        _configure_gemini_cli()
+        settings = json.loads((gemini_dir / "settings.json").read_text())
+        entries = settings["hooks"]["BeforeTool"]
+        assert len(entries) == 1
+        assert "vectimus" in entries[0]["hooks"][0]["command"]
 
     def test_handles_malformed_existing_json(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -449,7 +501,12 @@ class TestRemoveGeminiCLI:
         settings = {
             "hooks": {
                 "BeforeTool": [
-                    {"command": "vectimus hook --source gemini-cli", "matcher": ".*"}
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    }
                 ]
             }
         }
@@ -457,8 +514,21 @@ class TestRemoveGeminiCLI:
 
         _remove_gemini_cli(settings_path)
         result = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-        # File should be removed when empty
         assert not settings_path.exists() or "BeforeTool" not in result.get("hooks", {})
+
+    def test_removes_legacy_flat_hooks(self, tmp_path: Path) -> None:
+        from vectimus.cli.remove_cmd import _remove_gemini_cli
+
+        settings_path = tmp_path / "settings.json"
+        settings = {
+            "hooks": {
+                "BeforeTool": [{"command": "vectimus hook --source gemini-cli", "matcher": ".*"}]
+            }
+        }
+        settings_path.write_text(json.dumps(settings))
+
+        _remove_gemini_cli(settings_path)
+        assert not settings_path.exists()
 
     def test_preserves_non_vectimus_hooks(self, tmp_path: Path) -> None:
         from vectimus.cli.remove_cmd import _remove_gemini_cli
@@ -467,7 +537,12 @@ class TestRemoveGeminiCLI:
         settings = {
             "hooks": {
                 "BeforeTool": [
-                    {"command": "vectimus hook --source gemini-cli", "matcher": ".*"},
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    },
                     {"command": "my-custom-hook", "matcher": "write_file"},
                 ]
             }
@@ -487,7 +562,12 @@ class TestRemoveGeminiCLI:
         settings = {
             "hooks": {
                 "BeforeTool": [
-                    {"command": "vectimus hook --source gemini-cli", "matcher": ".*"}
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    }
                 ]
             }
         }
@@ -504,7 +584,12 @@ class TestRemoveGeminiCLI:
             "model": "gemini-2.5-pro",
             "hooks": {
                 "BeforeTool": [
-                    {"command": "vectimus hook --source gemini-cli", "matcher": ".*"}
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    }
                 ]
             },
         }
@@ -522,8 +607,25 @@ class TestRemoveGeminiCLI:
         settings = {
             "hooks": {
                 "BeforeTool": [
-                    {"command": "vectimus hook --source gemini-cli", "matcher": ".*"}
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    }
                 ]
+            }
+        }
+        settings_path.write_text(json.dumps(settings))
+        assert _has_vectimus_hooks_gemini(settings_path) is True
+
+    def test_has_vectimus_hooks_gemini_legacy(self, tmp_path: Path) -> None:
+        from vectimus.cli.remove_cmd import _has_vectimus_hooks_gemini
+
+        settings_path = tmp_path / "settings.json"
+        settings = {
+            "hooks": {
+                "BeforeTool": [{"command": "vectimus hook --source gemini-cli", "matcher": ".*"}]
             }
         }
         settings_path.write_text(json.dumps(settings))
@@ -533,12 +635,6 @@ class TestRemoveGeminiCLI:
         from vectimus.cli.remove_cmd import _has_vectimus_hooks_gemini
 
         settings_path = tmp_path / "settings.json"
-        settings = {
-            "hooks": {
-                "BeforeTool": [
-                    {"command": "my-custom-hook", "matcher": ".*"}
-                ]
-            }
-        }
+        settings = {"hooks": {"BeforeTool": [{"command": "my-custom-hook", "matcher": ".*"}]}}
         settings_path.write_text(json.dumps(settings))
         assert _has_vectimus_hooks_gemini(settings_path) is False

@@ -133,21 +133,23 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
 
 
 def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = False) -> None:
-    """Emit the deny output and exit with code 2.
+    """Emit the deny output and exit.
 
-    For Gemini CLI, the rejection reason is written to stderr (exit 2 convention).
-    For all other sources, deny JSON is written to stdout.
+    For Gemini CLI, deny JSON is written to stdout and exit 0 is used.
+    Gemini CLI treats non-zero exit codes as hook failures (crashes), not
+    deliberate denials.  The deny decision is communicated via the JSON
+    ``decision`` field so the agent sees the reason.
+
+    For all other sources, deny JSON is written to stdout with exit 2.
     """
     if escalate:
         output = _escalate_output(source, payload, reason)
     else:
         output = _deny_output(source, payload, reason)
 
+    print(json.dumps(output))
     if source == "gemini-cli":
-        # Gemini CLI reads stderr as the rejection reason on exit 2.
-        print(output["reason"], file=sys.stderr)
-    else:
-        print(json.dumps(output))
+        sys.exit(0)
     sys.exit(2)
 
 
@@ -159,6 +161,26 @@ def _project_path_from_payload(source: str, payload: dict) -> Path:
     else:
         raw = payload.get("cwd") or os.getcwd()
     return Path(raw).resolve()
+
+
+def _configure_structlog_stderr() -> None:
+    """Send structlog output to stderr so stdout stays clean for JSON responses.
+
+    Uses a wrapper that resolves sys.stderr at log time (not configure time)
+    to avoid holding references to CliRunner mock streams in tests.
+    """
+    import logging
+
+    import structlog
+
+    class _StderrLoggerFactory:
+        def __call__(self, *args, **kwargs):
+            return structlog.PrintLogger(file=sys.stderr)
+
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        logger_factory=_StderrLoggerFactory(),
+    )
 
 
 @click.command("hook")
@@ -178,6 +200,10 @@ def hook_cmd(source: str) -> None:
       echo '{"tool_name":"Bash",...}' | vectimus hook --source claude-code
       echo '{"command":"rm -rf /"}' | vectimus hook --source cursor
     """
+    # Redirect structlog to stderr so stdout stays clean for JSON responses.
+    # AI tools parse stdout for hook decisions; stray log lines break parsing.
+    _configure_structlog_stderr()
+
     debug = _debug_enabled()
     raw = sys.stdin.read()
 
