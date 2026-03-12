@@ -100,6 +100,9 @@ def _infer_action_type(tool_name: str, tool_args: dict[str, Any]) -> str:
     # Direct match
     if lower in _TOOL_NAME_ACTION_MAP:
         base = _TOOL_NAME_ACTION_MAP[lower]
+    elif "__" in tool_name:
+        # MCP tool pattern: server__tool — check before keyword heuristics
+        base = ActionType.MCP_TOOL
     elif "shell" in lower or "bash" in lower or "terminal" in lower:
         base = ActionType.SHELL_COMMAND
     elif "file" in lower and ("write" in lower or "edit" in lower or "create" in lower):
@@ -108,9 +111,6 @@ def _infer_action_type(tool_name: str, tool_args: dict[str, Any]) -> str:
         base = ActionType.FILE_READ
     elif "http" in lower or "request" in lower or "fetch" in lower or "web" in lower:
         base = ActionType.WEB_REQUEST
-    elif "__" in tool_name:
-        # MCP tool pattern: server__tool
-        base = ActionType.MCP_TOOL
     else:
         # Default to shell_command (broadest policy coverage)
         base = ActionType.SHELL_COMMAND
