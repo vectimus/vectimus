@@ -75,6 +75,14 @@ COPILOT_TOOL_MAP: dict[str, str] = {
     "view": ActionType.FILE_READ,
 }
 
+GEMINI_CLI_TOOL_MAP: dict[str, str] = {
+    "run_shell_command": ActionType.SHELL_COMMAND,
+    "read_file": ActionType.FILE_READ,
+    "write_file": ActionType.FILE_WRITE,
+    "edit_file": ActionType.FILE_WRITE,
+    "list_directory": ActionType.FILE_READ,
+}
+
 # Patterns that refine a shell_command into a more specific action type.
 _INFRA_PREFIXES = ("terraform", "kubectl", "docker", "aws", "gcloud", "az")
 _PKG_PREFIXES = ("npm", "pip", "cargo", "yarn", "pnpm", "bun")

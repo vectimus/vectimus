@@ -55,6 +55,11 @@ def remove_cmd(force: bool) -> None:
             if path.exists():
                 removals.append(("VS Code / Copilot", path))
 
+        elif tool_name == ToolName.GEMINI_CLI:
+            path = Path(".gemini") / "settings.json"
+            if path.exists() and _has_vectimus_hooks_gemini(path):
+                removals.append(("Gemini CLI", path))
+
     if not removals:
         click.echo("No Vectimus hooks found in this project.")
         return
@@ -70,6 +75,7 @@ def remove_cmd(force: bool) -> None:
         "Claude Code": _remove_claude_code,
         "Cursor": _remove_cursor,
         "VS Code / Copilot": _remove_copilot,
+        "Gemini CLI": _remove_gemini_cli,
     }
 
     for display_name, path in removals:
@@ -214,3 +220,39 @@ def _remove_copilot(hook_path: Path) -> None:
     parent = hook_path.parent
     if parent.is_dir() and not any(parent.iterdir()):
         parent.rmdir()
+
+
+def _has_vectimus_hooks_gemini(settings_path: Path) -> bool:
+    """Check if a Gemini CLI settings.json has Vectimus hooks."""
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    hooks = settings.get("hooks", {}).get("BeforeTool", [])
+    return any("vectimus" in h.get("command", "") for h in hooks)
+
+
+def _remove_gemini_cli(settings_path: Path) -> None:
+    """Remove Vectimus hooks from .gemini/settings.json, preserving other hooks."""
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+
+    hooks = settings.get("hooks", {}).get("BeforeTool", [])
+    cleaned = [h for h in hooks if "vectimus" not in h.get("command", "")]
+
+    if cleaned:
+        settings["hooks"]["BeforeTool"] = cleaned
+    elif "BeforeTool" in settings.get("hooks", {}):
+        del settings["hooks"]["BeforeTool"]
+
+    # Clean up empty hooks object.
+    if "hooks" in settings and not settings["hooks"]:
+        del settings["hooks"]
+
+    if not settings:
+        settings_path.unlink()
+    else:
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")

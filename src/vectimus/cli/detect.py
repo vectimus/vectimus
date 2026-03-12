@@ -21,6 +21,7 @@ class ToolName(StrEnum):
     CLAUDE_CODE = "claude-code"
     CURSOR = "cursor"
     COPILOT = "copilot"
+    GEMINI_CLI = "gemini-cli"
 
 
 class DetectionMethod(StrEnum):
@@ -71,6 +72,7 @@ def detect_all() -> DetectionReport:
     report.results[ToolName.CLAUDE_CODE] = _detect_claude_code()
     report.results[ToolName.CURSOR] = _detect_cursor()
     report.results[ToolName.COPILOT] = _detect_vscode()
+    report.results[ToolName.GEMINI_CLI] = _detect_gemini_cli()
     return report
 
 
@@ -80,6 +82,7 @@ def detect_tool(tool: ToolName) -> ToolDetectionResult:
         ToolName.CLAUDE_CODE: _detect_claude_code,
         ToolName.CURSOR: _detect_cursor,
         ToolName.COPILOT: _detect_vscode,
+        ToolName.GEMINI_CLI: _detect_gemini_cli,
     }
     return detectors[tool]()
 
@@ -253,6 +256,39 @@ def _check_copilot_extension() -> bool:
     except PermissionError:
         pass
     return False
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI
+# ---------------------------------------------------------------------------
+
+
+def _detect_gemini_cli() -> ToolDetectionResult:
+    """Detect Gemini CLI via PATH or config directory.
+
+    Gemini CLI is installed via npm (``npm i -g @anthropic-ai/gemini-cli``)
+    or downloaded directly.  It puts a ``gemini`` binary on PATH.  The
+    config directory is ``~/.gemini/``.
+    """
+    result = ToolDetectionResult(tool=ToolName.GEMINI_CLI)
+
+    which = shutil.which("gemini")
+    if which:
+        result.found = True
+        result.executable_path = which
+        result.method = DetectionMethod.PATH
+        result.details = f"Found on PATH: {which}"
+        return result
+
+    config_dir = Path.home() / ".gemini"
+    if config_dir.is_dir():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = f"Config directory exists: {config_dir}"
+        return result
+
+    result.details = "Not found on PATH or via ~/.gemini/ directory."
+    return result
 
 
 # ---------------------------------------------------------------------------
