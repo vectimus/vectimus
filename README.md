@@ -96,6 +96,38 @@ forbid (
 
 Every rule references the real-world incident that motivated it.  Governance rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
 
+## Policy files
+
+All Cedar policies live in the top-level `policies/` directory, organised into packs:
+
+**Base pack** (`policies/base/`):
+
+| File | Coverage |
+|------|----------|
+| `agent_safety.cedar` | Agent spawning limits, excessive turns, session flooding |
+| `database_safety.cedar` | Database credentials and CLI access |
+| `destructive_commands.cedar` | rm -rf, rmdir, terraform destroy and similar |
+| `file_protection.cedar` | .vectimus/ directory protection, sensitive file access |
+| `git_safety.cedar` | Force push, history rewriting, credential exposure |
+| `infrastructure_safety.cedar` | Infrastructure tool access (terraform, kubectl, docker, cloud CLIs) |
+| `mcp_tools.cedar` | MCP server allowlisting and input parameter inspection |
+| `package_operations.cedar` | npm publish, pip index, URL installs |
+| `secret_access.cedar` | Credential file paths, environment variables, secret managers |
+
+**OWASP Agentic pack** (`policies/owasp-agentic/`):
+
+| File | Coverage |
+|------|----------|
+| `asi01_goal_hijack.cedar` | Goal and objective hijacking |
+| `asi02_tool_misuse.cedar` | Tool parameter injection, command injection |
+| `asi03_identity_privilege.cedar` | Identity spoofing, privilege escalation |
+| `asi04_supply_chain.cedar` | Package tampering, repository poisoning |
+| `asi05_code_execution.cedar` | Code injection, eval execution |
+| `asi06_memory_poisoning.cedar` | Prompt injection, context hijacking |
+| `asi07_inter_agent.cedar` | Agent-to-agent communication attacks |
+| `asi08_cascading_failures.cedar` | Cascading system failures |
+| `asi10_rogue_agents.cedar` | Rogue agent detection |
+
 ## MCP server governance
 
 Vectimus blocks all MCP tool calls by default.  During `vectimus init`, it reads your existing tool configs (Claude Code, Cursor, VS Code) and offers to approve the MCP servers you already use:

@@ -184,7 +184,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import Decision, DecisionVerdict
+        from vectimus.engine.models import Decision, DecisionVerdict
 
         escalate_decision = Decision(
             decision=DecisionVerdict.ESCALATE,
@@ -210,7 +210,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import Decision, DecisionVerdict
+        from vectimus.engine.models import Decision, DecisionVerdict
 
         escalate_decision = Decision(
             decision=DecisionVerdict.ESCALATE,
@@ -235,7 +235,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import Decision, DecisionVerdict
+        from vectimus.engine.models import Decision, DecisionVerdict
 
         escalate_decision = Decision(
             decision=DecisionVerdict.ESCALATE,
@@ -262,7 +262,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import DecisionVerdict
+        from vectimus.engine.models import DecisionVerdict
 
         server_response = {
             "decision": DecisionVerdict.ESCALATE,
@@ -276,7 +276,7 @@ class TestEscalateFailsClosed:
         }
         with (
             patch(
-                "vectimus.core.config.VectimusConfig.get_server_url",
+                "vectimus.engine.config.VectimusConfig.get_server_url",
                 return_value="http://localhost:8080",
             ),
             patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),
@@ -296,7 +296,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import DecisionVerdict
+        from vectimus.engine.models import DecisionVerdict
 
         server_response = {
             "decision": DecisionVerdict.DENY,
@@ -315,7 +315,7 @@ class TestEscalateFailsClosed:
         }
         with (
             patch(
-                "vectimus.core.config.VectimusConfig.get_server_url",
+                "vectimus.engine.config.VectimusConfig.get_server_url",
                 return_value="http://localhost:8080",
             ),
             patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),
@@ -335,7 +335,7 @@ class TestEscalateFailsClosed:
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
-        from vectimus.core.models import DecisionVerdict
+        from vectimus.engine.models import DecisionVerdict
 
         server_response = {
             "decision": DecisionVerdict.DENY,
@@ -354,7 +354,7 @@ class TestEscalateFailsClosed:
         }
         with (
             patch(
-                "vectimus.core.config.VectimusConfig.get_server_url",
+                "vectimus.engine.config.VectimusConfig.get_server_url",
                 return_value="http://localhost:8080",
             ),
             patch("vectimus.cli.hook_cmd._post_to_server", return_value=server_response),

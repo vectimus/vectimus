@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from vectimus.core.models import ActionType, EventType
-from vectimus.core.normaliser import normalise
+from vectimus.engine.models import ActionType, EventType
+from vectimus.engine.normaliser import normalise
 
 
 class TestClaudeCodeNormaliser:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.models import (
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.models import (
     ActionInfo,
     ActionType,
     ContextInfo,

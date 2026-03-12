@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from vectimus.core.loader import PolicyLoader
+from vectimus.engine.loader import PolicyLoader
 
 
 @click.group("pack")

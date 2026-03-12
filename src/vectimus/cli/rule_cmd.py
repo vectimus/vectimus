@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from vectimus.core.loader import PolicyLoader
+from vectimus.engine.loader import PolicyLoader
 
 
 @click.group("rule")
@@ -92,7 +92,7 @@ def rule_disable(
     else:
         project_path = Path.cwd()
         loader.config.disable_rule_for_project(rule_id, project_path)
-        from vectimus.core.config import project_local_config_path
+        from vectimus.engine.config import project_local_config_path
 
         click.echo(
             f"Rule '{rule_id}' disabled for {project_path}.\n"
@@ -142,7 +142,7 @@ def rule_enable(
             return
         loader.config.enable_rule_for_project(rule_id, project_path)
         click.echo(f"Rule '{rule_id}' enabled for {project_path}.")
-        from vectimus.core.config import project_local_config_path
+        from vectimus.engine.config import project_local_config_path
 
         click.echo(f"Config: {project_local_config_path(project_path)}")
 
@@ -242,7 +242,7 @@ def rule_enforce(
 @click.option("--config", "config_path", default=None, help="Path to config.toml.")
 def rule_overrides(config_path: str | None) -> None:
     """Show project-specific rule overrides for the current directory."""
-    from vectimus.core.config import VectimusConfig
+    from vectimus.engine.config import VectimusConfig
 
     config = VectimusConfig(config_path)
     project_path = Path.cwd()

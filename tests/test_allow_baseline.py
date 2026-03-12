@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import PolicyLoader
-from vectimus.core.models import ActionType
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import PolicyLoader
+from vectimus.engine.models import ActionType
 
 
 @pytest.fixture()

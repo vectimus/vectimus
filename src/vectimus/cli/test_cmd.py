@@ -8,8 +8,8 @@ from typing import Any
 
 import click
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.normaliser import normalise
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.normaliser import normalise
 
 # Built-in test events that exercise each policy category.
 BUILTIN_TEST_EVENTS: list[dict[str, Any]] = [

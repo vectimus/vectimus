@@ -11,9 +11,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 import vectimus
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import PolicyLoader
-from vectimus.core.session_store import SessionStore
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import PolicyLoader
+from vectimus.engine.session_store import SessionStore
 from vectimus.exporters.jsonl import JsonlExporter
 from vectimus.server.config import ServerConfig
 

@@ -16,7 +16,7 @@ from vectimus.cli.rule_cmd import rule_cmd
 from vectimus.cli.server_cmd import server_cmd
 from vectimus.cli.status_cmd import status_cmd
 from vectimus.cli.test_cmd import test_cmd
-from vectimus.core.config import VectimusConfig
+from vectimus.engine.config import VectimusConfig
 
 
 @click.group()

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from vectimus.core.config import VectimusConfig
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import PolicyLoader
-from vectimus.core.models import DecisionVerdict
-from vectimus.core.normaliser import normalise
+from vectimus.engine.config import VectimusConfig
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import PolicyLoader
+from vectimus.engine.models import DecisionVerdict
+from vectimus.engine.normaliser import normalise
 
 SAMPLE_CEDAR = """\
 @id("int-001")

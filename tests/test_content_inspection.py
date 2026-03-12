@@ -6,7 +6,7 @@ shell_command policies via the second Cedar pass.
 
 from __future__ import annotations
 
-from vectimus.core.models import ActionType, DecisionVerdict
+from vectimus.engine.models import ActionType, DecisionVerdict
 
 # ---------------------------------------------------------------------------
 # File write content inspection

@@ -13,7 +13,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from vectimus.core.models import AuditRecord
+from vectimus.engine.models import AuditRecord
 from vectimus.exporters.base import BaseExporter
 
 _DEFAULT_DIR = Path.home() / ".vectimus"

@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vectimus.core.enrichment import (
+from vectimus.engine.enrichment import (
     _get_branch,
     _get_hostname,
     _get_identity,
     _get_repository,
     enrich,
 )
-from vectimus.core.models import (
+from vectimus.engine.models import (
     ActionInfo,
     ActionType,
     ContextInfo,
@@ -89,19 +89,19 @@ class TestVersionEnrichment:
 
 
 class TestHostnameEnrichment:
-    @patch("vectimus.core.enrichment.socket.gethostname", return_value="myhost")
+    @patch("vectimus.engine.enrichment.socket.gethostname", return_value="myhost")
     def test_sets_hostname(self, mock_gh: MagicMock) -> None:
         event = _bare_event()
         enriched = enrich(event)
         assert enriched.context.hostname == "myhost"
 
-    @patch("vectimus.core.enrichment.socket.gethostname", side_effect=OSError)
+    @patch("vectimus.engine.enrichment.socket.gethostname", side_effect=OSError)
     def test_handles_socket_failure(self, mock_gh: MagicMock) -> None:
         event = _bare_event()
         enriched = enrich(event)
         assert enriched.context.hostname is None
 
-    @patch("vectimus.core.enrichment.socket.gethostname", return_value="myhost")
+    @patch("vectimus.engine.enrichment.socket.gethostname", return_value="myhost")
     def test_does_not_overwrite_existing_hostname(self, mock_gh: MagicMock) -> None:
         event = _bare_event(hostname="preset-host")
         enriched = enrich(event)
@@ -114,14 +114,14 @@ class TestHostnameEnrichment:
 
 
 class TestIdentityEnrichment:
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_resolves_git_email(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="dev@example.com\n", returncode=0)
         event = _bare_event()
         enriched = enrich(event)
         assert enriched.identity.principal == "dev@example.com"
 
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_falls_back_to_git_name(self, mock_run: MagicMock) -> None:
         def side_effect(cmd, **kwargs):
             if "user.email" in cmd:
@@ -133,9 +133,9 @@ class TestIdentityEnrichment:
         enriched = enrich(event)
         assert enriched.identity.principal == "Dev User"
 
-    @patch("vectimus.core.enrichment.getpass.getuser", return_value="osuser")
+    @patch("vectimus.engine.enrichment.getpass.getuser", return_value="osuser")
     @patch(
-        "vectimus.core.enrichment.subprocess.run",
+        "vectimus.engine.enrichment.subprocess.run",
         side_effect=FileNotFoundError,
     )
     def test_falls_back_to_os_user(self, mock_run: MagicMock, mock_gp: MagicMock) -> None:
@@ -143,9 +143,9 @@ class TestIdentityEnrichment:
         enriched = enrich(event)
         assert enriched.identity.principal == "osuser"
 
-    @patch("vectimus.core.enrichment.getpass.getuser", side_effect=OSError)
+    @patch("vectimus.engine.enrichment.getpass.getuser", side_effect=OSError)
     @patch(
-        "vectimus.core.enrichment.subprocess.run",
+        "vectimus.engine.enrichment.subprocess.run",
         side_effect=FileNotFoundError,
     )
     def test_stays_unknown_when_all_fail(self, mock_run: MagicMock, mock_gp: MagicMock) -> None:
@@ -153,7 +153,7 @@ class TestIdentityEnrichment:
         enriched = enrich(event)
         assert enriched.identity.principal == "unknown"
 
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_does_not_overwrite_known_principal(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="other@example.com\n", returncode=0)
         event = _bare_event(principal="already@set.com")
@@ -167,7 +167,7 @@ class TestIdentityEnrichment:
 
 
 class TestGitContextEnrichment:
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_sets_repository_and_branch(self, mock_run: MagicMock) -> None:
         def side_effect(cmd, **kwargs):
             if "--show-toplevel" in cmd:
@@ -185,14 +185,14 @@ class TestGitContextEnrichment:
         assert enriched.context.repository == "/home/user/project"
         assert enriched.context.branch == "main"
 
-    @patch("vectimus.core.enrichment.subprocess.run", side_effect=FileNotFoundError)
+    @patch("vectimus.engine.enrichment.subprocess.run", side_effect=FileNotFoundError)
     def test_handles_no_git(self, mock_run: MagicMock) -> None:
         event = _bare_event()
         enriched = enrich(event)
         assert enriched.context.repository is None
         assert enriched.context.branch is None
 
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_handles_not_a_repo(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="", returncode=128)
         event = _bare_event()
@@ -201,7 +201,7 @@ class TestGitContextEnrichment:
         assert enriched.context.branch is None
 
     @patch(
-        "vectimus.core.enrichment.subprocess.run",
+        "vectimus.engine.enrichment.subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),
     )
     def test_handles_timeout(self, mock_run: MagicMock) -> None:
@@ -210,7 +210,7 @@ class TestGitContextEnrichment:
         assert enriched.context.repository is None
         assert enriched.context.branch is None
 
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_does_not_overwrite_existing_repo(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="other\n", returncode=0)
         event = _bare_event(repository="/preset/repo")
@@ -230,7 +230,7 @@ class TestGitContextEnrichment:
 
 
 class TestCacheEffectiveness:
-    @patch("vectimus.core.enrichment.socket.gethostname", return_value="cached-host")
+    @patch("vectimus.engine.enrichment.socket.gethostname", return_value="cached-host")
     def test_hostname_cached(self, mock_gh: MagicMock) -> None:
         e1 = _bare_event()
         e2 = _bare_event()
@@ -238,7 +238,7 @@ class TestCacheEffectiveness:
         enrich(e2)
         assert mock_gh.call_count == 1
 
-    @patch("vectimus.core.enrichment.subprocess.run")
+    @patch("vectimus.engine.enrichment.subprocess.run")
     def test_identity_cached(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="dev@example.com\n", returncode=0)
         e1 = _bare_event()

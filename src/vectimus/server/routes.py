@@ -22,10 +22,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import vectimus
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.models import AuditRecord, Decision, DecisionVerdict, VectimusEvent
-from vectimus.core.normaliser import normalise
-from vectimus.core.session_store import SessionStore
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.models import AuditRecord, Decision, DecisionVerdict, VectimusEvent
+from vectimus.engine.normaliser import normalise
+from vectimus.engine.session_store import SessionStore
 
 logger = structlog.get_logger(__name__)
 

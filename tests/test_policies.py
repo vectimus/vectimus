@@ -8,7 +8,7 @@ import pytest
 
 
 def _policy_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "src" / "vectimus" / "policies" / "base"
+    return Path(__file__).resolve().parent.parent / "policies" / "base"
 
 
 def _policy_files() -> list[Path]:
@@ -64,7 +64,7 @@ def test_cedarpy_validates_policies() -> None:
     for cedar_file in _policy_files():
         policy_text += cedar_file.read_text() + "\n\n"
 
-    from vectimus.core.schemas import CEDAR_SCHEMA_JSON
+    from vectimus.engine.schemas import CEDAR_SCHEMA_JSON
 
     result = cedarpy.validate_policies(policy_text, CEDAR_SCHEMA_JSON)
     assert result is not None

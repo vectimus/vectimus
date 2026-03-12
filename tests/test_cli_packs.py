@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from vectimus.cli.main import cli
-from vectimus.core.config import VectimusConfig
+from vectimus.engine.config import VectimusConfig
 
 SAMPLE_CEDAR = """\
 @id("test-001")

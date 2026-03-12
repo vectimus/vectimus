@@ -19,8 +19,8 @@ from vectimus.server.app import create_app  # noqa: E402
 from vectimus.server.config import ServerConfig  # noqa: E402
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_BASE_PACK = _PROJECT_ROOT / "src" / "vectimus" / "policies" / "base"
-_OWASP_PACK = _PROJECT_ROOT / "src" / "vectimus" / "policies" / "owasp-agentic"
+_BASE_PACK = _PROJECT_ROOT / "policies" / "base"
+_OWASP_PACK = _PROJECT_ROOT / "policies" / "owasp-agentic"
 
 
 @pytest.fixture()

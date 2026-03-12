@@ -19,9 +19,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from vectimus.core.evaluator import PolicyEngine
-from vectimus.core.loader import PolicyLoader
-from vectimus.core.models import (
+from vectimus.engine.evaluator import PolicyEngine
+from vectimus.engine.loader import PolicyLoader
+from vectimus.engine.models import (
     ActionInfo,
     ActionType,
     ContextInfo,
