@@ -260,11 +260,8 @@ class VectimusMiddleware:
         decision = self._engine.evaluate(event)
         write_audit(event, decision, log_dir=self._log_dir)
 
-        if decision.decision == DecisionVerdict.DENY:
         if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
             # In observe mode the engine already downgrades DENY/ESCALATE → ALLOW,
-            # so reaching here means enforcement is active.
-            return _format_denial(decision.matched_policy_ids, decision.reason)
             # so reaching here means enforcement is active.
             return _format_denial(decision.matched_policy_ids, decision.reason)
 
@@ -337,7 +334,6 @@ def create_interceptor(
         decision = engine.evaluate(event)
         write_audit(event, decision, log_dir=log_dir)
 
-        if decision.decision == DecisionVerdict.DENY:
         if decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
             return _format_denial(decision.matched_policy_ids, decision.reason)
 

@@ -18,6 +18,7 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     ToolName.CLAUDE_CODE: ("Claude Code", "_configure_claude_code"),
     ToolName.CURSOR: ("Cursor", "_configure_cursor"),
     ToolName.COPILOT: ("VS Code / Copilot", "_configure_copilot"),
+    ToolName.GEMINI_CLI: ("Gemini CLI", "_configure_gemini_cli"),
 }
 
 
@@ -46,6 +47,7 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
         ToolName.CLAUDE_CODE: _configure_claude_code,
         ToolName.CURSOR: _configure_cursor,
         ToolName.COPILOT: _configure_copilot,
+        ToolName.GEMINI_CLI: _configure_gemini_cli,
     }
 
     report = detect_all()
@@ -254,6 +256,41 @@ def _configure_copilot() -> None:
         raise SystemExit(1)
 
 
+def _is_vectimus_gemini_hook(hook: dict) -> bool:
+    """Check if a Gemini CLI hook entry was created by Vectimus."""
+    return "vectimus" in hook.get("command", "")
+
+
+def _configure_gemini_cli() -> None:
+    """Write .gemini/settings.json with Vectimus hooks, preserving existing hooks."""
+    config_dir = Path(".gemini")
+    config_dir.mkdir(exist_ok=True)
+    settings_path = config_dir / "settings.json"
+
+    command = f"{_vectimus_cmd()} hook --source gemini-cli"
+
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    settings.setdefault("hooks", {})
+    existing_hooks: list[dict] = settings["hooks"].get("BeforeTool", [])
+
+    # Merge: remove any previous Vectimus hooks, then prepend ours.
+    cleaned = [h for h in existing_hooks if not _is_vectimus_gemini_hook(h)]
+    cleaned.insert(0, {"command": command, "matcher": ".*"})
+    settings["hooks"]["BeforeTool"] = cleaned
+
+    try:
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    except OSError as exc:
+        click.echo(f"  Error writing {settings_path}: {exc}", err=True)
+        raise SystemExit(1)
+
+
 def _prompt_mcp_servers(
     discovered: dict[ToolName, list[str]],
     config: VectimusConfig,
@@ -267,6 +304,7 @@ def _prompt_mcp_servers(
         ToolName.CLAUDE_CODE: "Claude Code",
         ToolName.CURSOR: "Cursor",
         ToolName.COPILOT: "VS Code",
+        ToolName.GEMINI_CLI: "Gemini CLI",
     }
 
     # Deduplicate across tools while preserving per-tool display.

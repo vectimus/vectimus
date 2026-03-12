@@ -26,7 +26,7 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import DecisionVerdict
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "cursor", "copilot")
+VALID_SOURCES = ("claude-code", "cursor", "copilot", "gemini-cli")
 
 
 def _log_stderr(msg: str) -> None:
@@ -83,6 +83,11 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": reason,
             "agent_message": reason,
         }
+    if source == "gemini-cli":
+        return {
+            "decision": "deny",
+            "reason": reason,
+        }
     # claude-code and copilot use the same format
     event_key = "hook_event_name" if source == "claude-code" else "hookEventName"
     return {
@@ -114,12 +119,36 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": escalate_reason,
             "agent_message": agent_reason,
         }
+    if source == "gemini-cli":
+        return {
+            "decision": "deny",
+            "reason": agent_reason,
+        }
     event_key = "hook_event_name" if source == "claude-code" else "hookEventName"
     return {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": agent_reason,
     }
+
+
+def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = False) -> None:
+    """Emit the deny output and exit with code 2.
+
+    For Gemini CLI, the rejection reason is written to stderr (exit 2 convention).
+    For all other sources, deny JSON is written to stdout.
+    """
+    if escalate:
+        output = _escalate_output(source, payload, reason)
+    else:
+        output = _deny_output(source, payload, reason)
+
+    if source == "gemini-cli":
+        # Gemini CLI reads stderr as the rejection reason on exit 2.
+        print(output["reason"], file=sys.stderr)
+    else:
+        print(json.dumps(output))
+    sys.exit(2)
 
 
 def _project_path_from_payload(source: str, payload: dict) -> Path:
@@ -165,8 +194,7 @@ def hook_cmd(source: str) -> None:
     except json.JSONDecodeError:
         _log_stderr("invalid JSON payload (fail closed)")
         reason = "Vectimus: invalid JSON payload (fail closed)"
-        print(json.dumps(_deny_output(source, {}, reason)))
-        sys.exit(2)
+        _emit_deny(source, {}, reason)
 
     project_path = _project_path_from_payload(source, payload)
 
@@ -181,12 +209,12 @@ def hook_cmd(source: str) -> None:
             decision_val = result.get("decision", "deny")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
-                if hook_output is None or source != "claude-code":
+                if hook_output is None or source not in ("claude-code",):
                     reason = result.get("reason", "Denied by Vectimus")
                     if decision_val == DecisionVerdict.ESCALATE:
-                        hook_output = _escalate_output(source, payload, reason)
+                        _emit_deny(source, payload, reason, escalate=True)
                     else:
-                        hook_output = _deny_output(source, payload, reason)
+                        _emit_deny(source, payload, reason)
                 print(json.dumps(hook_output))
                 sys.exit(2)
             sys.exit(0)
@@ -208,8 +236,7 @@ def hook_cmd(source: str) -> None:
         reason = "Vectimus normalisation error (fail closed)"
         if source == "cursor":
             reason = "Normalisation error (fail closed)"
-        print(json.dumps(_deny_output(source, payload, reason)))
-        sys.exit(2)
+        _emit_deny(source, payload, reason)
 
     loader = PolicyLoader(project_path=project_path)
 
@@ -240,14 +267,12 @@ def hook_cmd(source: str) -> None:
 
     if decision.decision == DecisionVerdict.ESCALATE:
         reason = decision.reason or "Flagged by Vectimus"
-        print(json.dumps(_escalate_output(source, payload, reason)))
         _log_stderr_overrides(decision.matched_policy_ids)
-        sys.exit(2)
+        _emit_deny(source, payload, reason, escalate=True)
 
     if decision.decision == DecisionVerdict.DENY:
         reason = decision.reason or "Denied by Vectimus"
-        print(json.dumps(_deny_output(source, payload, reason)))
         _log_stderr_overrides(decision.matched_policy_ids)
-        sys.exit(2)
+        _emit_deny(source, payload, reason)
 
     sys.exit(0)

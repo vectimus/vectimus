@@ -17,7 +17,7 @@ import pytest
 
 def _run(coro):
     """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _mock_langchain():
@@ -136,9 +136,7 @@ class TestVectimusMiddleware:
         """A safe tool call should pass through to call_next."""
         call_next = AsyncMock(return_value="file contents here")
 
-        result = _run(
-            middleware("file_read", {"path": "/home/user/readme.txt"}, call_next)
-        )
+        result = _run(middleware("file_read", {"path": "/home/user/readme.txt"}, call_next))
 
         call_next.assert_awaited_once()
         assert result == "file contents here"
@@ -147,9 +145,7 @@ class TestVectimusMiddleware:
         """A dangerous tool call (rm -rf /) should be blocked."""
         call_next = AsyncMock(return_value="should not reach")
 
-        result = _run(
-            middleware("bash", {"command": "rm -rf /"}, call_next)
-        )
+        result = _run(middleware("bash", {"command": "rm -rf /"}, call_next))
 
         call_next.assert_not_awaited()
         assert "Blocked by Vectimus" in result
@@ -158,9 +154,7 @@ class TestVectimusMiddleware:
         """The denial message should reference the matched policy."""
         call_next = AsyncMock()
 
-        result = _run(
-            middleware("bash", {"command": "rm -rf /"}, call_next)
-        )
+        result = _run(middleware("bash", {"command": "rm -rf /"}, call_next))
 
         assert "vectimus-base-001" in result or "Blocked by Vectimus" in result
 
@@ -168,9 +162,7 @@ class TestVectimusMiddleware:
         """In observe mode, a would-be-denied action should still proceed."""
         call_next = AsyncMock(return_value="executed")
 
-        result = _run(
-            middleware_observe("bash", {"command": "rm -rf /"}, call_next)
-        )
+        result = _run(middleware_observe("bash", {"command": "rm -rf /"}, call_next))
 
         call_next.assert_awaited_once()
         assert result == "executed"
@@ -181,16 +173,12 @@ class TestVectimusMiddleware:
         call_next_danger = AsyncMock(return_value="should not reach")
 
         # Safe call
-        result1 = _run(
-            middleware("file_read", {"path": "/home/user/code.py"}, call_next_safe)
-        )
+        result1 = _run(middleware("file_read", {"path": "/home/user/code.py"}, call_next_safe))
         assert result1 == "ok"
         call_next_safe.assert_awaited_once()
 
         # Dangerous call
-        result2 = _run(
-            middleware("bash", {"command": "rm -rf /"}, call_next_danger)
-        )
+        result2 = _run(middleware("bash", {"command": "rm -rf /"}, call_next_danger))
         call_next_danger.assert_not_awaited()
         assert "Blocked" in result2
 
@@ -198,9 +186,7 @@ class TestVectimusMiddleware:
         """npm publish should be blocked by policy."""
         call_next = AsyncMock()
 
-        result = _run(
-            middleware("bash", {"command": "npm publish"}, call_next)
-        )
+        result = _run(middleware("bash", {"command": "npm publish"}, call_next))
 
         call_next.assert_not_awaited()
         assert "Blocked" in result
