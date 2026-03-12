@@ -266,7 +266,7 @@ def _check_copilot_extension() -> bool:
 def _detect_gemini_cli() -> ToolDetectionResult:
     """Detect Gemini CLI via PATH or config directory.
 
-    Gemini CLI is installed via npm (``npm i -g @anthropic-ai/gemini-cli``)
+    Gemini CLI is installed via npm (``npm i -g @google/gemini-cli``)
     or downloaded directly.  It puts a ``gemini`` binary on PATH.  The
     config directory is ``~/.gemini/``.
     """
