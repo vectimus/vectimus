@@ -1,0 +1,6 @@
+[pack]
+name = "database"
+version = "2.0.0"
+description = "Block ORM destructive flags and direct database destruction commands that bypass safety confirmations."
+author = "Vectimus"
+license = "Apache-2.0"

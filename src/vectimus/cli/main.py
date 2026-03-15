@@ -60,7 +60,7 @@ def observe_cmd(action: str) -> None:
 def mcp_cmd() -> None:
     """Manage the MCP server allowlist.
 
-    By default Vectimus blocks all MCP tool calls (rule vectimus-base-030).
+    By default Vectimus blocks all MCP tool calls via the mcp-safety pack.
     Use these commands to approve specific MCP servers.
     """
 

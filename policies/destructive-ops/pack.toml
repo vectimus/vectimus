@@ -1,0 +1,6 @@
+[pack]
+name = "destructive-ops"
+version = "2.0.0"
+description = "Block filesystem destruction, disk corruption, fork bombs and governance bypass commands."
+author = "Vectimus"
+license = "Apache-2.0"

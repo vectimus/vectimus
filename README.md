@@ -26,7 +26,7 @@ Vectimus intercepts every action an AI agent takes and evaluates it against [Ced
 
 ## Quick start
 
-Two commands. 78 policies with 368 rules active out of the box.
+Two commands. 78 rules across 11 domain-based packs active out of the box.
 
 ```bash
 pipx install vectimus
@@ -111,7 +111,7 @@ agent = create_agent(
 )
 ```
 
-When a tool call is denied, the agent receives a clear message like `"Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."` and can try a different approach.
+When a tool call is denied, the agent receives a clear message like `"Blocked by Vectimus policy vectimus-supchain-001: npm publish is not permitted."` and can try a different approach.
 
 ### MCP interceptor
 
@@ -163,7 +163,7 @@ runner = Runner(
 )
 ```
 
-When a tool call is denied, the agent receives a dict like `{"error": "Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."}` and can try a different approach.
+When a tool call is denied, the agent receives a dict like `{"error": "Blocked by Vectimus policy vectimus-supchain-001: npm publish is not permitted."}` and can try a different approach.
 
 ### Per-agent callback
 
@@ -189,10 +189,10 @@ The plugin approach is recommended over callbacks for consistent governance acro
 ## Example policy
 
 ```cedar
-@id("vectimus-base-015")
+@id("vectimus-supchain-001")
 @description("Block npm publish to prevent supply-chain attacks")
 @incident("Clinejection: malicious npm packages published by compromised AI agent, February 2026")
-@controls("SLSA-L2, ASI02-01, CC8.1-01")
+@controls("SLSA-L2, SOC2-CC6.8, NIST-AI-MG-3.2, EU-AI-15")
 forbid (
     principal,
     action == Vectimus::Action::"package_operation",
@@ -204,37 +204,25 @@ forbid (
 
 Every rule references the real-world incident that motivated it.  Governance rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
 
-## Policy files
+## Policy packs
 
-All Cedar policies live in the top-level `policies/` directory, organised into packs:
+All Cedar policies live in the top-level `policies/` directory, organised into 11 domain-based packs:
 
-**Base pack** (`policies/base/`):
+| Pack | Directory | Coverage |
+|------|-----------|----------|
+| Destructive Ops | `policies/destructive-ops/` | rm -rf, rmdir, terraform destroy and similar |
+| File Integrity | `policies/file-integrity/` | .vectimus/ directory protection, sensitive file access |
+| Git Safety | `policies/git-safety/` | Force push, history rewriting, credential exposure |
+| Infrastructure | `policies/infrastructure/` | Infrastructure tool access (terraform, kubectl, docker, cloud CLIs) |
+| Secrets | `policies/secrets/` | Credential file paths, environment variables, secret managers |
+| Supply Chain | `policies/supply-chain/` | npm publish, pip index, URL installs, package tampering |
+| Database | `policies/database/` | Database credentials and CLI access |
+| MCP Safety | `policies/mcp-safety/` | MCP server allowlisting and input parameter inspection |
+| Agent Governance | `policies/agent-governance/` | Agent spawning limits, goal hijacking, rogue agent detection |
+| Code Execution | `policies/code-execution/` | Code injection, eval execution, unsafe interpreters |
+| Data Exfiltration | `policies/data-exfiltration/` | Data leakage via network, file or tool channels |
 
-| File | Coverage |
-|------|----------|
-| `agent_safety.cedar` | Agent spawning limits, excessive turns, session flooding |
-| `database_safety.cedar` | Database credentials and CLI access |
-| `destructive_commands.cedar` | rm -rf, rmdir, terraform destroy and similar |
-| `file_protection.cedar` | .vectimus/ directory protection, sensitive file access |
-| `git_safety.cedar` | Force push, history rewriting, credential exposure |
-| `infrastructure_safety.cedar` | Infrastructure tool access (terraform, kubectl, docker, cloud CLIs) |
-| `mcp_tools.cedar` | MCP server allowlisting and input parameter inspection |
-| `package_operations.cedar` | npm publish, pip index, URL installs |
-| `secret_access.cedar` | Credential file paths, environment variables, secret managers |
-
-**OWASP Agentic pack** (`policies/owasp-agentic/`):
-
-| File | Coverage |
-|------|----------|
-| `asi01_goal_hijack.cedar` | Goal and objective hijacking |
-| `asi02_tool_misuse.cedar` | Tool parameter injection, command injection |
-| `asi03_identity_privilege.cedar` | Identity spoofing, privilege escalation |
-| `asi04_supply_chain.cedar` | Package tampering, repository poisoning |
-| `asi05_code_execution.cedar` | Code injection, eval execution |
-| `asi06_memory_poisoning.cedar` | Prompt injection, context hijacking |
-| `asi07_inter_agent.cedar` | Agent-to-agent communication attacks |
-| `asi08_cascading_failures.cedar` | Cascading system failures |
-| `asi10_rogue_agents.cedar` | Rogue agent detection |
+Rule IDs follow the format `vectimus-<pack>-NNN` where `<pack>` is a short name for the domain (e.g. `vectimus-destops-001`, `vectimus-supchain-001`, `vectimus-exfil-001`).
 
 ## MCP server governance
 
@@ -276,10 +264,10 @@ Disable specific rules for specific repositories without affecting global policy
 
 ```bash
 # Disable a rule for the current project only
-vectimus rule disable vectimus-base-010
+vectimus rule disable vectimus-destops-003
 
 # Disable a rule everywhere
-vectimus rule disable vectimus-base-010 --global
+vectimus rule disable vectimus-destops-003 --global
 
 # View project-specific overrides
 vectimus rule overrides

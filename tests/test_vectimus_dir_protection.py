@@ -6,7 +6,7 @@ from vectimus.engine.models import ActionType, DecisionVerdict
 
 
 class TestVectimusDirectoryProtection:
-    """Policy vectimus-base-020e blocks writes to .vectimus/ directory."""
+    """Policy vectimus-fileint-005 blocks writes to .vectimus/ directory."""
 
     def test_write_vectimus_config_denied(self, engine, make_event) -> None:
         event = make_event(
@@ -16,7 +16,7 @@ class TestVectimusDirectoryProtection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-020e" in decision.matched_policy_ids
+        assert "vectimus-fileint-005" in decision.matched_policy_ids
 
     def test_write_vectimus_nested_denied(self, engine, make_event) -> None:
         event = make_event(
@@ -26,7 +26,7 @@ class TestVectimusDirectoryProtection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-020e" in decision.matched_policy_ids
+        assert "vectimus-fileint-005" in decision.matched_policy_ids
 
     def test_read_vectimus_config_allowed(self, engine, make_event) -> None:
         event = make_event(
@@ -55,4 +55,4 @@ class TestVectimusDirectoryProtection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-020e" in decision.matched_policy_ids
+        assert "vectimus-fileint-005" in decision.matched_policy_ids

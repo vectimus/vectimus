@@ -55,7 +55,7 @@ class TestLineBasedContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-001" in decision.matched_policy_ids
+        assert "vectimus-destops-001" in decision.matched_policy_ids
 
     def test_malicious_line_at_4999_caught(self, engine, make_event) -> None:
         """Dangerous command at line 4999 (within limit) is caught."""

@@ -1,0 +1,6 @@
+[pack]
+name = "git-safety"
+version = "2.0.0"
+description = "Block dangerous git operations that destroy history or push unreviewed code to protected branches."
+author = "Vectimus"
+license = "Apache-2.0"

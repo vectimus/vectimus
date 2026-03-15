@@ -26,7 +26,7 @@ class TestFileWriteContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-006" in decision.matched_policy_ids
+        assert "vectimus-codexec-001" in decision.matched_policy_ids
 
     def test_write_rm_rf_root_denied(self, engine, make_event) -> None:
         event = make_event(
@@ -37,7 +37,7 @@ class TestFileWriteContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-001" in decision.matched_policy_ids
+        assert "vectimus-destops-001" in decision.matched_policy_ids
 
     def test_write_disk_overwrite_denied(self, engine, make_event) -> None:
         event = make_event(
@@ -48,7 +48,7 @@ class TestFileWriteContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-002" in decision.matched_policy_ids
+        assert "vectimus-destops-002" in decision.matched_policy_ids
 
     def test_write_normal_code_allowed(self, engine, make_event) -> None:
         event = make_event(
@@ -123,7 +123,7 @@ class TestScriptExecutionContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-006" in decision.matched_policy_ids
+        assert "vectimus-codexec-001" in decision.matched_policy_ids
 
     def test_bash_script_benign_allowed(self, engine, make_event) -> None:
         event = make_event(
@@ -144,7 +144,7 @@ class TestScriptExecutionContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-002" in decision.matched_policy_ids
+        assert "vectimus-destops-002" in decision.matched_policy_ids
 
     def test_no_script_content_allowed(self, engine, make_event) -> None:
         """Script file not found -> no second pass -> allowed."""
@@ -165,7 +165,7 @@ class TestScriptExecutionContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-base-006" in decision.matched_policy_ids
+        assert "vectimus-codexec-001" in decision.matched_policy_ids
 
     def test_script_content_reason_mentions_script(self, engine, make_event) -> None:
         event = make_event(

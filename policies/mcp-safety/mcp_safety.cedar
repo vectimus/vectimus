@@ -7,21 +7,21 @@
 // A tool that internally accesses credentials or writes to CI/CD pipelines
 // without exposing that in its input parameters will not be caught here.
 //
-// The most effective MCP control is server allowlisting (rules 030-031).
+// The most effective MCP control is server allowlisting (mcp-001).
 // If a server is not on the approved list the request is blocked regardless
-// of what tool or input is involved.  Input inspection rules (032-037) add
-// defence in depth for approved servers whose tools receive sensitive paths
-// or commands as parameters.
+// of what tool or input is involved.  Input inspection rules (mcp-003-007)
+// add defence in depth for approved servers whose tools receive sensitive
+// paths or commands as parameters.
 
 
 // ---------------------------------------------------------------------------
 // Server and tool allowlisting
 // ---------------------------------------------------------------------------
 
-@id("vectimus-base-030")
+@id("vectimus-mcp-001")
 @description("Block MCP tool calls to servers not on the approved list")
 @incident("Clinejection: agent communicated with malicious MCP server that instructed it to publish backdoored packages, February 2026")
-@controls("OWASP-ASI02, SOC2-CC6.1, NIST-AI-MG-3.2, EU-AI-15")
+@controls("OWASP-ASI02, SOC2-CC6.1, NIST-AI-MG-3.2, EU-AI-15, NIST-CSF-DE.CM-06, ISO27001-A.5.23")
 @suggested_alternative("Add the MCP server to your approved list with: vectimus mcp allow <server-name>")
 forbid (
     principal,
@@ -34,10 +34,10 @@ forbid (
     true
 };
 
-@id("vectimus-base-031")
+@id("vectimus-mcp-002")
 @description("Block MCP tools that execute arbitrary shell commands on the server")
 @incident("Compromised MCP server exposed run_command tool used to pivot into internal network, 2026")
-@controls("OWASP-ASI02, SOC2-CC6.1")
+@controls("OWASP-ASI02, SOC2-CC6.1, NIST-CSF-DE.CM-06, ISO27001-A.5.23")
 @suggested_alternative("Do not approve MCP servers that expose arbitrary command execution.  Use purpose-built tools instead.")
 forbid (
     principal,
@@ -60,10 +60,10 @@ forbid (
 // without exposing it in their input schema.
 // ---------------------------------------------------------------------------
 
-@id("vectimus-base-032")
+@id("vectimus-mcp-003")
 @description("Block MCP tool calls whose inputs reference credential or secret paths")
 @incident("Clinejection: agent passed credential file paths to malicious MCP tool, February 2026")
-@controls("OWASP-ASI02, SOC2-CC6.1, NIST-AI-MG-3.2, EU-AI-15")
+@controls("OWASP-ASI02, SOC2-CC6.1, NIST-AI-MG-3.2, EU-AI-15, NIST-CSF-DE.CM-06, ISO27001-A.8.3")
 @suggested_alternative("Access secrets through environment variables or a secrets manager, not via MCP tool inputs.")
 forbid (
     principal,
@@ -80,10 +80,10 @@ forbid (
     context.file_path like "*token.json"
 };
 
-@id("vectimus-base-033")
+@id("vectimus-mcp-004")
 @description("Block MCP tool calls whose inputs reference private key files")
 @incident("Agent passed SSH private key path to MCP tool which exfiltrated key contents, 2026")
-@controls("OWASP-ASI02, SOC2-CC6.1, EU-AI-15")
+@controls("OWASP-ASI02, SOC2-CC6.1, EU-AI-15, NIST-CSF-DE.CM-06, ISO27001-A.8.3")
 @suggested_alternative("Use ssh-agent or the relevant CLI tool to work with keys.  Do not pass key file paths to MCP tools.")
 forbid (
     principal,
@@ -96,10 +96,10 @@ forbid (
     context.file_path like "*id_ed25519*"
 };
 
-@id("vectimus-base-034")
+@id("vectimus-mcp-005")
 @description("Block MCP tool calls whose inputs reference CI/CD pipeline files")
 @incident("Agent asked MCP tool to modify GitHub Actions workflow, injecting malicious build step, 2026")
-@controls("OWASP-ASI02, SLSA-L2, SOC2-CC8.1")
+@controls("OWASP-ASI02, SLSA-L2, SOC2-CC8.1, NIST-CSF-DE.CM-06, ISO27001-A.8.9")
 @suggested_alternative("Propose CI/CD changes via a pull request for human review.  Do not pass pipeline paths to MCP tools.")
 forbid (
     principal,
@@ -112,10 +112,10 @@ forbid (
     context.file_path like "*.circleci/*"
 };
 
-@id("vectimus-base-035")
+@id("vectimus-mcp-006")
 @description("Block MCP tool calls whose inputs contain dangerous shell commands")
 @incident("Agent passed npm publish command to MCP tool, publishing backdoored package, Clinejection February 2026")
-@controls("OWASP-ASI02, SLSA-L2, SOC2-CC6.8")
+@controls("OWASP-ASI02, SLSA-L2, SOC2-CC6.8, NIST-CSF-DE.CM-06, ISO27001-A.5.23")
 @suggested_alternative("Package operations and remote code execution must be done directly by the developer, not via MCP tools.")
 forbid (
     principal,
@@ -144,10 +144,10 @@ forbid (
     context.command like "*Remove-Item*-Recurse*-Force*"
 };
 
-@id("vectimus-base-036")
+@id("vectimus-mcp-007")
 @description("Block MCP tool calls whose inputs reference governance configuration files")
 @incident("Agent asked MCP tool to overwrite .claude/settings.json, disabling safety hooks, 2026")
-@controls("OWASP-ASI02, SOC2-CC6.1, EU-AI-14")
+@controls("OWASP-ASI02, SOC2-CC6.1, EU-AI-14, NIST-CSF-DE.CM-06, ISO27001-A.8.9")
 @suggested_alternative("Governance configuration must be changed by a human administrator, not via MCP tools.")
 forbid (
     principal,

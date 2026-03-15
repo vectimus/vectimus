@@ -1,0 +1,6 @@
+[pack]
+name = "mcp-safety"
+version = "2.0.0"
+description = "Control agent-to-MCP-server interactions via server allowlisting and input parameter inspection."
+author = "Vectimus"
+license = "Apache-2.0"

@@ -320,7 +320,7 @@ class TestExternalPacksDir:
         packs = loader.discover_packs()
         names = [p.name for p in packs]
         assert "custom" in names
-        assert "base" in names  # built-in still present
+        assert len(packs) >= 2  # custom + at least one built-in
 
     def test_missing_external_dir_is_harmless(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -335,29 +335,29 @@ class TestExternalPacksDir:
         loader = PolicyLoader(config_path=config_path)
         packs = loader.discover_packs()
         # Should still find built-in packs without error.
-        names = [p.name for p in packs]
-        assert "base" in names
+        assert len(packs) > 0
 
 
 class TestBuiltinPolicies:
-    """Test that the built-in base pack has a pack.toml and loads correctly."""
+    """Test that built-in packs have pack.toml manifests and load correctly."""
 
-    def test_builtin_base_pack_discovered(self) -> None:
+    def test_builtin_packs_discovered(self) -> None:
         loader = PolicyLoader()
         packs = loader.discover_packs()
-        names = [p.name for p in packs]
-        assert "base" in names
+        assert len(packs) > 0, "At least one built-in pack should be discovered"
 
-    def test_builtin_base_pack_has_rules(self) -> None:
+    def test_builtin_packs_have_rules(self) -> None:
         loader = PolicyLoader()
         packs = loader.discover_packs()
-        base = next(p for p in packs if p.name == "base")
-        assert base.rule_count > 0
+        for pack in packs:
+            assert pack.rule_count > 0, f"Pack '{pack.name}' should have rules"
 
     def test_builtin_policies_load(self) -> None:
         loader = PolicyLoader()
         text = loader.load_active_policies()
-        assert "vectimus-base-001" in text
+        assert len(text) > 0, "Loaded policy text should not be empty"
+        # Verify at least one forbid rule is present.
+        assert "forbid" in text
 
 
 # ---------------------------------------------------------------------------
