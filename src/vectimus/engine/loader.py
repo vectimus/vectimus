@@ -16,6 +16,11 @@ import structlog
 
 from vectimus.engine.config import VectimusConfig
 
+try:
+    from vectimus.engine.policy_sync import get_policy_cache_dir
+except Exception:
+    get_policy_cache_dir = lambda: None  # noqa: E731
+
 logger = structlog.get_logger(__name__)
 
 
@@ -153,7 +158,9 @@ def _load_pack_manifest(pack_dir: Path) -> PackInfo | None:
 # MCP server allowlist
 # ---------------------------------------------------------------------------
 
-_MCP_ALLOWLIST_RULE_ID = "vectimus-base-030"
+# Rule ID for the MCP default-deny-all rule, which is rewritten with an
+# allowlist when MCP servers are configured.
+_MCP_ALLOWLIST_RULE_ID = "vectimus-mcp-001"
 
 # MCP server names must match this pattern to prevent Cedar injection.
 _SAFE_SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -164,8 +171,8 @@ def _validate_mcp_server_name(name: str) -> bool:
     return bool(_SAFE_SERVER_NAME_RE.match(name)) and len(name) <= 128
 
 
-def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
-    """Generate Cedar policy text for rule 030 with an allowlist.
+def _build_mcp_allowlist_cedar(allowed_servers: list[str], rule_id: str) -> str:
+    """Generate Cedar policy text for the MCP default-deny rule with an allowlist.
 
     Produces a forbid rule with an ``unless`` clause that permits calls
     to the listed servers.  When no servers are configured, the static
@@ -188,7 +195,7 @@ def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
     if not safe_servers:
         # No valid servers: return the default deny-all rule.
         return (
-            f'@id("{_MCP_ALLOWLIST_RULE_ID}")\n'
+            f'@id("{rule_id}")\n'
             '@description("Block MCP tool calls to servers not on the approved list")\n'
             '@incident("Clinejection: agent communicated with malicious MCP server that '
             'instructed it to publish backdoored packages, February 2026")\n'
@@ -204,7 +211,7 @@ def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
 
     conditions = " ||\n    ".join(f'context.mcp_server == "{s}"' for s in safe_servers)
     return (
-        f'@id("{_MCP_ALLOWLIST_RULE_ID}")\n'
+        f'@id("{rule_id}")\n'
         '@description("Block MCP tool calls to servers not on the approved list")\n'
         '@incident("Clinejection: agent communicated with malicious MCP server that '
         'instructed it to publish backdoored packages, February 2026")\n'
@@ -247,13 +254,19 @@ class PolicyLoader:
             own MCP configuration through.
         """
         if policy_dirs is None:
-            # Installed package: policies bundled at vectimus/policies/
+            # Bundled policies always load as the baseline.
             builtin = Path(__file__).resolve().parent.parent / "policies"
             if not builtin.is_dir():
                 # Development (editable install): policies at repo root
                 builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
+            self._policy_dirs = [builtin]
+            # API-downloaded cache supplements bundled policies (cache packs
+            # take precedence for duplicate rule IDs during load).
+            cache_dir = get_policy_cache_dir()
+            if cache_dir is not None:
+                self._policy_dirs.append(cache_dir)
             external = Path.home() / ".vectimus" / "packs"
-            self._policy_dirs = [builtin, external]
+            self._policy_dirs.append(external)
             if project_path is not None:
                 project_packs = project_path / ".vectimus" / "packs"
                 if project_packs.is_dir():
@@ -277,9 +290,11 @@ class PolicyLoader:
         """Scan policy directories for pack.toml manifests.
 
         Returns metadata for all found packs with enabled/disabled status
-        resolved from the user config.
+        resolved from the user config.  When multiple directories contain a
+        pack with the same name, later directories in ``_policy_dirs`` win
+        (cache overrides bundled, project-local overrides both).
         """
-        packs: list[PackInfo] = []
+        packs_by_name: dict[str, PackInfo] = {}
 
         for policy_dir in self._policy_dirs:
             if not policy_dir.is_dir():
@@ -302,8 +317,10 @@ class PolicyLoader:
                     rule_count += len(parse_rules_from_cedar(text))
                 pack_info.rule_count = rule_count
 
-                packs.append(pack_info)
+                # Later directories override earlier ones by pack name.
+                packs_by_name[pack_info.name] = pack_info
 
+        packs = list(packs_by_name.values())
         self._packs = packs
         return packs
 
@@ -361,7 +378,9 @@ class PolicyLoader:
                         cedar_text = rule.cedar_text
                         # Rewrite MCP server allowlist rule with configured servers.
                         if rule.rule_id == _MCP_ALLOWLIST_RULE_ID and mcp_allowlist:
-                            cedar_text = _build_mcp_allowlist_cedar(mcp_allowlist)
+                            cedar_text = _build_mcp_allowlist_cedar(
+                                mcp_allowlist, rule_id=rule.rule_id
+                            )
                         parts.append(cedar_text)
                     all_rules.append(rule)
 

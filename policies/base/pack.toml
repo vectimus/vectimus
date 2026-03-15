@@ -1,6 +1,0 @@
-[pack]
-name = "base"
-version = "0.1.0"
-description = "Baseline security rules for AI coding tools.  Each rule maps to a real-world incident."
-author = "Vectimus"
-license = "Apache-2.0"

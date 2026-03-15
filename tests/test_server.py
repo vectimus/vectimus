@@ -19,8 +19,7 @@ from vectimus.server.app import create_app  # noqa: E402
 from vectimus.server.config import ServerConfig  # noqa: E402
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_BASE_PACK = _PROJECT_ROOT / "policies" / "base"
-_OWASP_PACK = _PROJECT_ROOT / "policies" / "owasp-agentic"
+_POLICIES_ROOT = _PROJECT_ROOT / "policies"
 
 
 @pytest.fixture()
@@ -31,9 +30,11 @@ def app():
 
 @pytest.fixture()
 def flood_app():
-    """App with low session limits and both base + OWASP policies for flood testing."""
+    """App with low session limits and all policy packs for flood testing."""
     parts: list[str] = []
-    for pack_dir in [_BASE_PACK, _OWASP_PACK]:
+    for pack_dir in sorted(_POLICIES_ROOT.iterdir()):
+        if not pack_dir.is_dir() or not (pack_dir / "pack.toml").exists():
+            continue
         for cedar_file in sorted(pack_dir.glob("*.cedar")):
             parts.append(cedar_file.read_text())
 

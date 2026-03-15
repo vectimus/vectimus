@@ -134,8 +134,9 @@ class PolicyEngine:
         If *loader* is provided it takes precedence.  The loader handles
         pack discovery, rule filtering and config-based enable/disable.
 
-        If *policy_dir* is ``None`` and no loader is given, the built-in
-        ``policies/base`` directory shipped with the package is used.
+        If *policy_dir* is ``None`` and no loader is given, a PolicyLoader
+        is created to discover all built-in policy packs shipped with the
+        package.
 
         If *observe* is True, all decisions are logged but enforcement is
         disabled (DENY decisions are downgraded to ALLOW).
@@ -215,13 +216,12 @@ class PolicyEngine:
             self._load_from_loader()
         elif self._policy_dir is None:
             # Use built-in policies shipped with the package.
-            pkg_dir = Path(__file__).resolve().parent.parent / "policies" / "base"
-            if not pkg_dir.is_dir():
-                # Development (editable install): policies at repo root.
-                pkg_dir = (
-                    Path(__file__).resolve().parent.parent.parent.parent / "policies" / "base"
-                )
-            self._load_from_dir(pkg_dir)
+            # Create a PolicyLoader to discover all pack directories
+            # dynamically (scanning for pack.toml manifests).
+            from vectimus.engine.loader import PolicyLoader
+
+            self._loader = PolicyLoader()
+            self._load_from_loader()
         else:
             self._load_from_dir(Path(self._policy_dir))
 

@@ -1,100 +1,122 @@
 # Vectimus
 
-Deterministic governance for AI coding agents. Cedar policies. Under 5ms. Apache 2.0.
+**Deterministic governance for AI coding agents and agentic frameworks.** Cedar policies evaluate every agent action in under 5ms. No config. No account.
 
-## The problem
+[![PyPI](https://img.shields.io/pypi/v/vectimus)](https://pypi.org/project/vectimus/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/vectimus/vectimus/actions/workflows/ci.yml/badge.svg)](https://github.com/vectimus/vectimus/actions)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://pypi.org/project/vectimus/)
 
-AI coding agents execute shell commands, write files, install packages and call APIs with no guardrails.  The Clinejection attack in February 2026 compromised over 4,000 developers when a malicious MCP server instructed agents to publish backdoored npm packages.  A month earlier, an autonomous agent ran `terraform destroy` against a production environment because nothing stopped it.  Without governance, every agent is one prompt injection away from catastrophe.
+<p align="center">
+  <img src="demo.gif" alt="Claude Code session with Vectimus blocking rm -rf, terraform destroy and force push while allowing safe commands" width="720">
+</p>
 
-## What Vectimus does
-
-Vectimus intercepts every action an AI agent takes and evaluates it against [Cedar](https://www.cedarpolicy.com/) policies before execution.  It returns allow, deny or escalate decisions in single-digit milliseconds.  It works across Claude Code, Claude Agent SDK, Cursor, GitHub Copilot and Gemini CLI through their native hook mechanisms.
-
-```
-┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────┐
-│  AI Agent   │────▶│   Vectimus    │────▶│ Cedar Policy │────▶│ Decision │
-│ (tool call) │     │  Normaliser   │     │   Engine     │     │ allow /  │
-│             │◀────│               │◀────│              │◀────│ deny     │
-└─────────────┘     └───────────────┘     └──────────────┘     └──────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │  Audit Log   │
-                    │  (JSONL)     │
-                    └──────────────┘
-```
-
-## Quick start
-
-Two commands. 78 policies with 368 rules active out of the box.
+## Install
 
 ```bash
 pipx install vectimus
 vectimus init
 ```
 
-Or with uv:
+That's it. Cedar policies across 11 security domains are now evaluating every tool call your agent makes. Dangerous commands, secret access, infrastructure changes and supply chain attacks are blocked before execution.
 
-```bash
-uv tool install vectimus
-vectimus init
+## Why this exists
+
+AI coding agents and agentic frameworks run shell commands, write files, install packages and call APIs. Without a policy layer, nothing stands between a prompt injection and `rm -rf /`.
+
+These are not hypothetical risks:
+
+- **[Clinejection](https://snyk.io/blog/cline-supply-chain-attack-prompt-injection-github-actions/) (Feb 2026)** — A prompt injection in a GitHub issue title caused an AI agent to publish backdoored npm packages. 4,000 developer machines compromised in 8 hours.
+- **[Terraform destroy incident](https://www.huuphan.com/2026/03/claude-code-wiped-production-database-terraform.html) (Feb 2026)** — An AI agent unpacked old Terraform configs and ran `terraform destroy`, wiping a production VPC, RDS database and ECS cluster.
+- **[IDEsaster](https://thehackernews.com/2025/12/researchers-uncover-30-flaws-in-ai.html) (Dec 2025)** — Researchers found 30+ vulnerabilities across Cursor, Windsurf and GitHub Copilot. 24 CVEs assigned.
+
+Vectimus is a defense-in-depth layer. Whatever permission setup your team uses, Vectimus adds deterministic policy evaluation underneath. Same input, same decision, every time.
+
+## What it catches
+
+Every policy references the real-world incident that motivated it. No "best practice" filler.
+
+| Pack | What it blocks | Example |
+|------|---------------|---------|
+| **Destructive Ops** | `rm -rf`, `terraform destroy`, `docker system prune` | Production wipe prevention |
+| **Secrets** | Credential file access, env variable exposure | `.env`, AWS keys, SSH keys |
+| **Supply Chain** | `npm publish`, `pip install` from URLs, registry tampering | Clinejection-class attacks |
+| **Infrastructure** | `terraform apply`, `kubectl delete`, cloud CLI mutations | Unreviewed infra changes |
+| **Code Execution** | `eval()`, `exec()`, unsafe interpreter invocations | Code injection via agents |
+| **Data Exfiltration** | `curl` to external hosts, file upload, data piping | Credential theft, data leakage |
+| **File Integrity** | Writes to `.vectimus/`, sensitive config paths | Governance tampering |
+| **Database** | Direct database CLI access, credential harvesting | Unauthorized data access |
+| **Git Safety** | `git push --force`, history rewriting, credential commits | Repository damage |
+| **MCP Safety** | Unapproved MCP servers, dangerous tool parameters | MCP server supply chain |
+| **Agent Governance** | Unchecked agent spawning, goal hijacking, rogue agents | Multi-agent control |
+
+11 packs. [Browse all policies →](https://vectimus.com/policies)
+
+Maps to [OWASP Agentic Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (all 10 categories), SOC 2, NIST AI RMF, NIST CSF 2.0, ISO 27001 and EU AI Act. [Full compliance mappings →](https://vectimus.com/docs/compliance)
+
+## Example policy
+
+```cedar
+@id("vectimus-supchain-001")
+@description("Block npm publish to prevent supply-chain attacks")
+@incident("Clinejection: malicious npm packages published by compromised AI agent, Feb 2026")
+@controls("SLSA-L2, SOC2-CC6.8, NIST-AI-MG-3.2, EU-AI-15")
+forbid (
+    principal,
+    action == Vectimus::Action::"package_operation",
+    resource
+) when {
+    context.command like "*npm publish*"
+};
 ```
 
-That's it. Your agents are now governed. Dangerous commands, secret access, infrastructure changes and supply chain attacks are blocked before execution.
+Every rule has an `@incident` annotation linking it to the attack it prevents and `@controls` mapping it to compliance frameworks. Governance rules backed by real attacks are compelling. Rules that exist "because best practice" are not.
 
-Verify your setup:
+## Policies that stay current
 
-```bash
-vectimus test
-```
-
-## Observe mode
-
-If you want to trial Vectimus without blocking anything, observe mode logs all decisions to the audit trail but always allows actions.
+Vectimus checks for policy updates in the background every 24 hours. New rules ship when new threats appear.
 
 ```bash
-vectimus observe on       # Enable observe mode
-vectimus observe off      # Switch to enforcement
-vectimus observe status   # Show current mode
+vectimus policy update    # Pull latest now
+vectimus policy status    # Check version and sync info
 ```
 
-Review the audit log at `~/.vectimus/logs/` to understand which actions your policies would block. For CI pipelines, set `VECTIMUS_OBSERVE=true` as an environment variable.
+Behind the scenes, [Sentinel](https://github.com/vectimus/sentinel) runs a three-agent pipeline daily:
 
-## Uninstall
+- **Threat Hunter** scans the agentic AI security landscape for new incidents -- MCP vulnerabilities, tool poisoning, agent exploitation -- and classifies them against OWASP, NIST and CIS frameworks
+- **Security Engineer** drafts Cedar policies and replays the incident in a sandbox to prove the policy catches the attack before opening a PR
+- **Threat Analyst** writes the advisory and incident analysis for the [public threat feed](https://vectimus.com/threats)
 
-To remove Vectimus hooks from all detected tools in the current project:
+A human reviews every PR. The policy ships. Your install picks it up automatically.
 
-```bash
-vectimus remove
-```
+The entire pipeline is governed by Vectimus itself. The agents that write governance rules operate under the same governance system.
 
-This strips Vectimus entries from your tool configs while preserving any non-Vectimus hooks. Your `~/.vectimus/` config and audit logs are not touched.
+[Live threat dashboard →](https://vectimus.com/threats) | [Incident blog posts →](https://vectimus.com/blog)
 
 ## Supported tools
 
 | Tool | Hook mechanism | Status |
 |------|---------------|--------|
-| Claude Code | HTTP hook or command hook | Supported |
-| Claude Agent SDK | Same as Claude Code (shared hook system) | Supported |
-| Cursor | Command hook | Supported |
-| GitHub Copilot (VS Code) | Command hook | Supported |
-| Gemini CLI | Command hook | Supported |
-| LangChain / LangGraph | Middleware + MCP interceptor | Supported |
-| Google ADK | Plugin + per-agent callback | Supported |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Command hook | Supported |
+| [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents) | Shared Claude Code hook system | Supported |
+| [Cursor](https://www.cursor.com/) | Command hook | Supported |
+| [GitHub Copilot](https://github.com/features/copilot) (VS Code) | Command hook | Supported |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Command hook | Supported |
 
-## LangGraph / LangChain integration
+## Framework support
 
-Vectimus can govern tool calls made by LangChain agents and LangGraph workflows.  The same Cedar policies that block `rm -rf` in a coding agent will block dangerous tool calls in a LangGraph customer support bot, a RAG pipeline or a multi-agent system.
+The same Cedar policies that govern coding agents also govern agentic framework tool calls.
 
-Install with the langgraph extras:
+| Framework | Integration | Install |
+|-----------|------------|---------|
+| [LangGraph / LangChain](https://github.com/langchain-ai/langgraph) | Middleware + MCP interceptor | `pip install vectimus[langgraph]` |
+| [Google ADK](https://github.com/google/adk-python) | Runner plugin + per-agent callback | `pip install vectimus[adk]` |
+| [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents) | Shared hook system | Built-in |
 
-```bash
-pip install vectimus[langgraph]
-```
+<details>
+<summary><strong>LangGraph / LangChain integration</strong></summary>
 
 ### Agent middleware
-
-Use `VectimusMiddleware` with `create_agent()` to evaluate every tool call against Cedar policies:
 
 ```python
 from vectimus.integrations.langgraph import VectimusMiddleware
@@ -111,11 +133,7 @@ agent = create_agent(
 )
 ```
 
-When a tool call is denied, the agent receives a clear message like `"Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."` and can try a different approach.
-
 ### MCP interceptor
-
-For MCP tool calls via `MultiServerMCPClient`, use `create_interceptor`:
 
 ```python
 from vectimus.integrations.langgraph import create_interceptor
@@ -131,21 +149,14 @@ client = MultiServerMCPClient(
 )
 ```
 
-Both mechanisms support observe mode — log what would be blocked without actually blocking, so you can trial Vectimus in your pipelines before switching to enforcement.
+Both support observe mode for trialling without enforcement.
 
-## Google ADK integration
+</details>
 
-Vectimus governs tool calls in Google Agent Development Kit agents. The same Cedar policies apply whether your agent runs on Gemini, GPT-4o or Claude via LiteLLM.
-
-Install with the adk extras:
-
-```bash
-pip install vectimus[adk]
-```
+<details>
+<summary><strong>Google ADK integration</strong></summary>
 
 ### Runner plugin (recommended)
-
-Use `VectimusADKPlugin` with `Runner(plugins=[...])` to apply governance globally across all agents managed by that runner:
 
 ```python
 from vectimus.integrations.adk import VectimusADKPlugin
@@ -163,11 +174,7 @@ runner = Runner(
 )
 ```
 
-When a tool call is denied, the agent receives a dict like `{"error": "Blocked by Vectimus policy vectimus-base-015: npm publish is not permitted."}` and can try a different approach.
-
 ### Per-agent callback
-
-For governing a single agent without a plugin, use `create_before_tool_callback`:
 
 ```python
 from vectimus.integrations.adk import create_before_tool_callback
@@ -184,61 +191,33 @@ agent = LlmAgent(
 )
 ```
 
-The plugin approach is recommended over callbacks for consistent governance across all agents in a runner. Both support observe mode for trialling without enforcement.
+</details>
 
-## Example policy
+## How it works
 
-```cedar
-@id("vectimus-base-015")
-@description("Block npm publish to prevent supply-chain attacks")
-@incident("Clinejection: malicious npm packages published by compromised AI agent, February 2026")
-@controls("SLSA-L2, ASI02-01, CC8.1-01")
-forbid (
-    principal,
-    action == Vectimus::Action::"package_operation",
-    resource
-) when {
-    context.command like "*npm publish*"
-};
+```
+┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────┐
+│  AI Agent   │────▶│   Vectimus    │────▶│ Cedar Policy │────▶│ allow /  │
+│ (tool call) │     │  Normaliser   │     │   Engine     │     │ deny /   │
+│             │◀────│               │◀────│              │◀────│ escalate │
+└─────────────┘     └───────────────┘     └──────────────┘     └──────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  Audit Log   │
+                    │  (JSONL)     │
+                    └──────────────┘
 ```
 
-Every rule references the real-world incident that motivated it.  Governance rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
+- **Normaliser** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
+- **Cedar Engine** evaluates all loaded policies deterministically. No LLM in the loop. Same input, same decision.
+- **Audit Log** records every decision with full context for compliance evidence and incident investigation
 
-## Policy files
-
-All Cedar policies live in the top-level `policies/` directory, organised into packs:
-
-**Base pack** (`policies/base/`):
-
-| File | Coverage |
-|------|----------|
-| `agent_safety.cedar` | Agent spawning limits, excessive turns, session flooding |
-| `database_safety.cedar` | Database credentials and CLI access |
-| `destructive_commands.cedar` | rm -rf, rmdir, terraform destroy and similar |
-| `file_protection.cedar` | .vectimus/ directory protection, sensitive file access |
-| `git_safety.cedar` | Force push, history rewriting, credential exposure |
-| `infrastructure_safety.cedar` | Infrastructure tool access (terraform, kubectl, docker, cloud CLIs) |
-| `mcp_tools.cedar` | MCP server allowlisting and input parameter inspection |
-| `package_operations.cedar` | npm publish, pip index, URL installs |
-| `secret_access.cedar` | Credential file paths, environment variables, secret managers |
-
-**OWASP Agentic pack** (`policies/owasp-agentic/`):
-
-| File | Coverage |
-|------|----------|
-| `asi01_goal_hijack.cedar` | Goal and objective hijacking |
-| `asi02_tool_misuse.cedar` | Tool parameter injection, command injection |
-| `asi03_identity_privilege.cedar` | Identity spoofing, privilege escalation |
-| `asi04_supply_chain.cedar` | Package tampering, repository poisoning |
-| `asi05_code_execution.cedar` | Code injection, eval execution |
-| `asi06_memory_poisoning.cedar` | Prompt injection, context hijacking |
-| `asi07_inter_agent.cedar` | Agent-to-agent communication attacks |
-| `asi08_cascading_failures.cedar` | Cascading system failures |
-| `asi10_rogue_agents.cedar` | Rogue agent detection |
+Evaluation is entirely local. Zero telemetry. The only network call is a background policy update check every 24 hours (disable with `vectimus policy auto-update off`). [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
 
 ## MCP server governance
 
-Vectimus blocks all MCP tool calls by default.  During `vectimus init`, it reads your existing tool configs (Claude Code, Cursor, VS Code) and offers to approve the MCP servers you already use:
+Vectimus blocks all MCP tool calls by default. During `vectimus init` it reads your existing tool configs and offers to approve the MCP servers you already use:
 
 ```
 MCP servers detected:
@@ -248,13 +227,7 @@ MCP servers detected:
 Allow all 3 servers? [y/N]:
 ```
 
-To skip the prompts and approve everything automatically:
-
-```bash
-vectimus init --allow-mcp
-```
-
-You can also manage the allowlist manually at any time:
+Manage the allowlist at any time:
 
 ```bash
 vectimus mcp allow github
@@ -262,41 +235,61 @@ vectimus mcp allow slack
 vectimus mcp list
 ```
 
-Or via environment variable for CI/CD:
+Approved servers still go through input inspection rules that check for credential paths, CI/CD tampering and dangerous commands in tool parameters.
+
+## Observe mode
+
+Trial Vectimus without blocking anything. Observe mode logs all decisions but always allows actions.
 
 ```bash
-export VECTIMUS_MCP_ALLOWED="github,slack,jira"
+vectimus observe on       # Log only, no enforcement
+vectimus observe off      # Switch to enforcement
+vectimus observe status   # Show current mode
 ```
 
-Approved servers still go through input inspection rules that check for credential paths, CI/CD file tampering and dangerous commands in tool parameters.  See [Writing policies](https://vectimus.com/docs/writing-policies) for details.
+Review the audit log at `~/.vectimus/logs/` to understand what your policies would block. Deploy in observe mode, review with your security team, then switch to enforcement.
 
-## Per-project rule overrides
-
-Disable specific rules for specific repositories without affecting global policy:
+## Per-project overrides
 
 ```bash
-# Disable a rule for the current project only
-vectimus rule disable vectimus-base-010
-
-# Disable a rule everywhere
-vectimus rule disable vectimus-base-010 --global
-
-# View project-specific overrides
-vectimus rule overrides
+vectimus rule disable vectimus-destruct-003              # This project only
+vectimus rule disable vectimus-destruct-003 --global     # All projects
+vectimus rule overrides                                  # View overrides
 ```
 
-Overrides are stored in `.vectimus/config.toml` in the project root.  The `.vectimus/` directory is protected by policy — agents cannot modify it.
+Overrides live in `.vectimus/config.toml` in the project root. The `.vectimus/` directory is protected by policy -- agents cannot modify it.
+
+## Server mode
+
+For team-wide enforcement, run Vectimus as a shared server:
+
+```bash
+pip install vectimus[server]
+vectimus serve
+```
+
+All agent hooks forward to the server for centralised policy evaluation, audit logging and identity-aware decisions. [Server documentation →](https://vectimus.com/docs/server)
+
+## Uninstall
+
+```bash
+vectimus remove
+```
+
+Strips Vectimus hooks from all detected tools in the current project. Preserves non-Vectimus hooks. Config and audit logs at `~/.vectimus/` are not touched.
 
 ## Documentation
 
-Full documentation is available at [vectimus.com/docs](https://vectimus.com/docs).
+Full docs at [vectimus.com/docs](https://vectimus.com/docs):
 
 - [Getting started](https://vectimus.com/docs/getting-started)
 - [Writing policies](https://vectimus.com/docs/writing-policies)
 - [Running a shared server](https://vectimus.com/docs/server)
 - [Architecture](https://vectimus.com/docs/architecture)
+- [Compliance mappings](https://vectimus.com/docs/compliance)
 
-## Configuration
+<details>
+<summary><strong>Configuration reference</strong></summary>
 
 Create `.vectimus/config.toml` in your project root:
 
@@ -327,16 +320,13 @@ Or use environment variables:
 | `VECTIMUS_LOG_DIR` | Audit log directory |
 | `VECTIMUS_OBSERVE` | Set to `true` for observe mode |
 | `VECTIMUS_MCP_ALLOWED` | Comma-separated approved MCP servers |
-| `VECTIMUS_API_KEY` | Single API key for server authentication |
-| `VECTIMUS_API_KEYS` | Named team keys (`name:key,name:key`) |
-| `VECTIMUS_WORKERS` | Server worker processes |
-| `VECTIMUS_SSL_CERTFILE` | TLS certificate file |
-| `VECTIMUS_SSL_KEYFILE` | TLS private key file |
-| `VECTIMUS_CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
+| `VECTIMUS_API_KEY` | API key for server authentication |
+
+</details>
 
 ## Contributing
 
-Contributions are welcome.  Please open an issue before submitting large changes.
+Contributions welcome. Please open an issue before submitting large changes.
 
 1. Fork and clone the repository
 2. Install dev dependencies: `uv pip install -e ".[dev]"`
@@ -345,4 +335,4 @@ Contributions are welcome.  Please open an issue before submitting large changes
 
 ## License
 
-Apache 2.0.  See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

@@ -30,7 +30,7 @@ vectimus init                # Generate hook configs for detected AI tools
 ## Project layout
 
 ```
-policies/           # Cedar policy packs (base/, owasp-agentic/) — top-level for visibility
+policies/           # Cedar policy packs (11 domain-based dirs) — top-level for visibility
 src/vectimus/
   engine/           # Core evaluation: evaluator, normaliser, models, Cedar schema, config, loader
   adapters/         # Thin hook translators for coding tools (Claude Code, Cursor, Copilot)
@@ -87,15 +87,16 @@ docs/               # Documentation
 
 **Incident and standards-driven policies.**  Every policy rule must reference a real-world incident where possible or reference a control in a set of standards or recommendations like OWASP, etc.  Rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
 
-**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
+**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules (11 packs) with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
 
-**No telemetry.**  The open-source version sends no data anywhere.
+**No telemetry.**  The open-source version sends no usage data.  The only network call is a background policy update check every 24 hours that contacts `api.vectimus.com` to fetch new policies.  This sends the installed version via the User-Agent header.  No other data leaves the machine.
 
 **Escalation is simple (MVP).**  ESCALATE is always denied at the hook level.  The hook returns exit code 2 with a reason stating the action requires human approval.  No Slack, no approval workflows yet.  In future the enterprise tier will support out-of-band approval (Slack, ServiceNow, PagerDuty) where the hook denies, the approval happens asynchronously and the developer retries after approval.  The invariant that must never change: ESCALATE produces a deny at the hook.  Approval never happens inline.
 
 ## Cedar policy conventions
 
-- Policy IDs: `vectimus-base-NNN` or `owasp-NNN`
+- Policy IDs: `vectimus-<pack>-NNN` (e.g. `vectimus-destruct-001`, `vectimus-supchain-001`, `vectimus-exfil-001`)
+- Pack short names: `destruct`, `fileint`, `git`, `infra`, `secrets`, `supchain`, `db`, `mcp`, `agentgov`, `codexec`, `exfil`
 - Required annotations: `@id`, `@description`
 - Recommended annotations: `@incident`, `@controls`, `@suggested_alternative`
 - Duplicate `@id` values across packs cause a load-time error

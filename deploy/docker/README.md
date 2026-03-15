@@ -12,7 +12,7 @@ This starts the Vectimus server on port 8420 with the built-in policy set.
 
 ## Configuration
 
-All server settings are configurable via environment variables. See the [server docs](https://vectimus.dev/docs/server) for the full list.
+All server settings are configurable via environment variables. See the [server docs](https://vectimus.com/docs/server) for the full list.
 
 ```yaml
 services:

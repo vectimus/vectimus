@@ -9,9 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic policy updates: policies sync from `api.vectimus.com` in the background every 24 hours
+- `vectimus policy update` CLI command for manual policy sync
+- `vectimus policy status` CLI command to show policy version and sync info
+- Policy cache at `~/.vectimus/policy-cache/` supplements bundled policies (cached packs override bundled packs with matching names)
 - Google ADK integration: `VectimusADKPlugin` for `Runner(plugins=[...])` and `create_before_tool_callback` for per-agent callbacks
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
+
+### Changed
+
+- Policy packs reorganized from 2 packs (base, owasp-agentic) to 11 domain-based packs: destructive-ops, secrets, supply-chain, infrastructure, code-execution, data-exfiltration, file-integrity, database, git-safety, mcp-safety, agent-governance
+- Rule IDs changed from `vectimus-base-NNN`/`owasp-NNN` to `vectimus-<domain>-NNN` format
+- `evaluator.py` fallback path now uses `PolicyLoader` for dynamic pack discovery instead of hardcoded `policies/base`
+- `pack disable` confirmation prompt applies to all packs (previously only triggered for the "base" pack)
+- MCP allowlist rewriting uses new `vectimus-mcp-001` rule ID
 
 ## [0.17.0] - 2026-03-11
 
@@ -80,7 +92,7 @@ Initial public release.
 
 - Cedar-based policy engine with deterministic evaluation (<50ms p99)
 - 52 rules in base pack covering destructive operations, CI/CD protection, credential safety, recursive deletion and more
-- 29 rules in OWASP Agentic pack (ASI01-ASI10, 9 of 10 enforced)
+- 29 rules in OWASP Agentic pack (ASI01-ASI10, all 10 enforced)
 - Native hook integration for Claude Code, Cursor and GitHub Copilot
 - `vectimus rule list`, `rule show`, `rule disable`, `rule enable` CLI
 - `vectimus status` with tool detection and audit statistics

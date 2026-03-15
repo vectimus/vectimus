@@ -1,14 +1,13 @@
-// ASI01: Agent Goal Hijack -- detect data exfiltration patterns that are
+// Data exfiltration -- detect and block data exfiltration patterns that are
 // the observable consequence of goal hijack via prompt injection.
 // Vectimus cannot detect the goal manipulation itself but can intercept
 // the exfiltration actions that typically follow.
 
-@id("owasp-001")
-@category("ASI01")
-@incident("Amazon Q Developer secrets leaked via DNS and prompt injection, 2025")
+@id("vectimus-exfil-001")
 @description("Block base64-encoded data exfiltration via curl or wget")
+@incident("Amazon Q Developer secrets leaked via DNS and prompt injection, 2025")
+@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15, NIST-CSF-PR.DS-02, NIST-CSF-DE.CM-01, ISO27001-A.8.23")
 @suggested_alternative("If you need to send data to an external service, request human approval and use an approved API endpoint.")
-@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15")
 forbid (
     principal,
     action == Vectimus::Action::"shell_command",
@@ -27,12 +26,11 @@ forbid (
     context.command like "*certutil*-encode*|*curl*"
 };
 
-@id("owasp-002")
-@category("ASI01")
-@incident("Amazon Q Developer secrets leaked via DNS exfiltration, 2025")
+@id("vectimus-exfil-002")
 @description("Block DNS exfiltration via nslookup or dig with piped input")
+@incident("Amazon Q Developer secrets leaked via DNS exfiltration, 2025")
+@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15, NIST-CSF-PR.DS-02, NIST-CSF-DE.CM-01, ISO27001-A.8.23")
 @suggested_alternative("Use standard DNS lookup tools without piped encoded data.  If DNS queries are needed, run them directly with explicit domain names.")
-@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15")
 forbid (
     principal,
     action == Vectimus::Action::"shell_command",
@@ -48,12 +46,11 @@ forbid (
     context.command like "*Resolve-DnsName*`(*"
 };
 
-@id("owasp-003")
-@category("ASI01")
-@incident("EchoLeak: zero-click indirect prompt injection against M365 Copilot, 2025")
+@id("vectimus-exfil-003")
 @description("Block piping credential or system files to network transfer tools")
+@incident("EchoLeak: zero-click indirect prompt injection against M365 Copilot, 2025")
+@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15, NIST-CSF-PR.DS-02, NIST-CSF-DE.CM-01, ISO27001-A.8.23")
 @suggested_alternative("Do not pipe sensitive file contents to network tools.  Access files locally and use approved channels for data transfer.")
-@controls("OWASP-ASI01, SOC2-CC6.6, EU-AI-15")
 forbid (
     principal,
     action == Vectimus::Action::"shell_command",

@@ -71,9 +71,13 @@ def pack_disable(
         click.echo(f"Pack '{name}' not found.", err=True)
         raise SystemExit(1)
 
-    if name == "base" and not yes:
-        click.echo("The base pack contains critical security rules.  Are you sure?")
-        if not click.confirm("Disable the base pack?"):
+    # Warn before disabling any pack that contains critical security rules.
+    if not yes:
+        click.echo(
+            f"The '{name}' pack contains security rules.  Disabling it will remove"
+            f" {pack.rule_count} rules from evaluation."
+        )
+        if not click.confirm(f"Disable the '{name}' pack?"):
             click.echo("Aborted.")
             return
 

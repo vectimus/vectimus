@@ -128,7 +128,7 @@ BUILTIN_TEST_EVENTS: list[dict[str, Any]] = [
         "source": "claude-code",
         "payload": {
             "tool_name": "Bash",
-            "tool_input": {"command": "vectimus rule disable vectimus-base-007"},
+            "tool_input": {"command": "vectimus rule disable some-rule"},
             "hook_event_name": "PreToolUse",
         },
         "expected": "deny",
