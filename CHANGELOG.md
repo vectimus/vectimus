@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rule IDs changed from `vectimus-base-NNN`/`owasp-NNN` to `vectimus-<domain>-NNN` format
 - `evaluator.py` fallback path now uses `PolicyLoader` for dynamic pack discovery instead of hardcoded `policies/base`
 - `pack disable` confirmation prompt applies to all packs (previously only triggered for the "base" pack)
-- MCP allowlist rewriting supports both legacy (`vectimus-base-030`) and new (`vectimus-mcp-001`) rule IDs
+- MCP allowlist rewriting uses new `vectimus-mcp-001` rule ID
 
 ## [0.17.0] - 2026-03-11
 

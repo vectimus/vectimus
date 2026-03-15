@@ -160,7 +160,7 @@ def _load_pack_manifest(pack_dir: Path) -> PackInfo | None:
 
 # Rule ID for the MCP default-deny-all rule, which is rewritten with an
 # allowlist when MCP servers are configured.
-_MCP_ALLOWLIST_RULE_IDS = {"vectimus-mcp-001", "vectimus-base-030"}
+_MCP_ALLOWLIST_RULE_ID = "vectimus-mcp-001"
 
 # MCP server names must match this pattern to prevent Cedar injection.
 _SAFE_SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -377,7 +377,7 @@ class PolicyLoader:
                     else:
                         cedar_text = rule.cedar_text
                         # Rewrite MCP server allowlist rule with configured servers.
-                        if rule.rule_id in _MCP_ALLOWLIST_RULE_IDS and mcp_allowlist:
+                        if rule.rule_id == _MCP_ALLOWLIST_RULE_ID and mcp_allowlist:
                             cedar_text = _build_mcp_allowlist_cedar(
                                 mcp_allowlist, rule_id=rule.rule_id
                             )
