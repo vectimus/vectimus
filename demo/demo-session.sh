@@ -1,74 +1,115 @@
 #!/bin/bash
-# Simulated session for asciinema recording
-# Shows Vectimus blocking dangerous commands and allowing safe ones
+# Simulated Claude Code session for asciinema recording
+# Shows what a user sees when Vectimus blocks dangerous agent actions
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 BOLD='\033[1m'
 DIM='\033[2m'
+ITALIC='\033[3m'
 NC='\033[0m'
 
-type_cmd() {
-  printf "${BOLD}\$ ${NC}"
-  for (( i=0; i<${#1}; i++ )); do
-    printf "%s" "${1:$i:1}"
-    sleep 0.04
+slow_print() {
+  local text="$1"
+  local delay="${2:-0.02}"
+  for (( i=0; i<${#text}; i++ )); do
+    printf "%s" "${text:$i:1}"
+    sleep "$delay"
   done
-  echo ""
+}
+
+agent_think() {
+  printf "${DIM}${ITALIC}"
+  slow_print "$1" 0.015
+  printf "${NC}\n"
   sleep 0.3
 }
 
-print_deny() {
-  local policy="$1"
-  local reason="$2"
-  local time="$3"
-  printf "  ${RED}✗ DENIED${NC}  ${reason}\n"
-  printf "  ${DIM}Policy: ${policy}  |  ${time}${NC}\n"
-  echo ""
-  sleep 0.8
+tool_block() {
+  local tool="$1"
+  local cmd="$2"
+  printf "\n${DIM}───${NC}\n"
+  printf "${BOLD}  ❯ ${tool}${NC}\n"
+  printf "    ${cmd}\n"
+  sleep 0.4
 }
 
-print_allow() {
-  local time="$1"
-  printf "  ${GREEN}✓ ALLOWED${NC}  ${DIM}${time}${NC}\n"
-  echo ""
-  sleep 0.8
+hook_deny() {
+  local reason="$1"
+  local policy="$2"
+  printf "\n  ${RED}✗ Hook blocked tool call${NC}\n"
+  printf "  ${RED}${reason}${NC}\n"
+  printf "  ${DIM}Policy: ${policy}${NC}\n"
+  sleep 0.6
+}
+
+hook_allow_and_run() {
+  local output="$1"
+  printf "\n${output}\n"
+  sleep 0.4
 }
 
 clear
-echo ""
-printf "${BLUE}${BOLD}Vectimus${NC} — Deterministic governance for AI coding agents\n"
-printf "${DIM}Cedar policies evaluate every agent action before execution${NC}\n"
-echo ""
-sleep 1.5
+printf "\n"
+printf "${DIM}╭──────────────────────────────────────────────────────────────╮${NC}\n"
+printf "${DIM}│${NC}  ${BOLD}Claude Code${NC}  ${DIM}— with Vectimus governance${NC}                       ${DIM}│${NC}\n"
+printf "${DIM}╰──────────────────────────────────────────────────────────────╯${NC}\n"
+printf "\n"
+sleep 1
 
-printf "${DIM}# AI agent attempts dangerous commands...${NC}\n"
-echo ""
+# Prompt
+printf "${BOLD}${CYAN}>${NC} "
+slow_print "Clean up the project and deploy to production" 0.03
+printf "\n\n"
+sleep 0.8
+
+# Agent tries rm -rf
+agent_think "I'll start by cleaning up temporary files."
+
+tool_block "Bash" "rm -rf /"
+hook_deny "Block recursive deletion of root directory" "vectimus-destops-001"
+printf "\n"
 sleep 0.5
 
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"rm -rf /\"}'"
-print_deny "vectimus-destops-001" "Block recursive deletion of root directory" "2.1ms"
+agent_think "That was blocked. Let me try a safer approach."
+printf "\n"
+sleep 0.3
 
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"terraform destroy -auto-approve\"}'"
-print_deny "vectimus-infra-001" "Block terraform destroy without explicit approval" "1.8ms"
+# Agent tries terraform destroy
+agent_think "I'll tear down the staging environment first."
 
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"git push --force origin main\"}'"
-print_deny "vectimus-git-001" "Block force push to main branch" "1.6ms"
-
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"cat ~/.ssh/id_rsa\"}'"
-print_deny "vectimus-secrets-002" "Block access to SSH private keys" "1.7ms"
-
-printf "${DIM}# Safe commands pass through silently...${NC}\n"
-echo ""
+tool_block "Bash" "terraform destroy -auto-approve"
+hook_deny "Block terraform destroy without explicit approval" "vectimus-infra-001"
+printf "\n"
 sleep 0.5
 
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"ls src/\"}'"
-print_allow "1.4ms"
+# Agent tries force push
+agent_think "Let me push the changes to main."
 
-type_cmd "vectimus hook <<< '{\"tool_name\":\"bash\",\"command\":\"cat README.md\"}'"
-print_allow "1.3ms"
+tool_block "Bash" "git push --force origin main"
+hook_deny "Block force push to main branch" "vectimus-git-001"
+printf "\n"
+sleep 0.5
 
-printf "${DIM}11 policy packs  •  <5ms evaluation  •  zero config${NC}\n"
-echo ""
+# Agent does something safe
+agent_think "Let me check the project structure instead."
+
+tool_block "Bash" "ls src/"
+hook_allow_and_run "  ${DIM}components/  hooks/  lib/  index.ts${NC}"
+printf "\n"
+sleep 0.5
+
+agent_think "I'll read the deployment config."
+
+tool_block "Read" "deploy.yml"
+hook_allow_and_run "  ${DIM}region: us-east-1${NC}\n  ${DIM}stage: production${NC}"
+printf "\n"
+sleep 0.8
+
+printf "${DIM}───${NC}\n"
+printf "${DIM}Vectimus: 11 policy packs  •  <5ms evaluation  •  zero config${NC}\n\n"
 sleep 2

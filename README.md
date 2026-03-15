@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://pypi.org/project/vectimus/)
 
 <p align="center">
-  <img src="demo.gif" alt="Vectimus blocking rm -rf, terraform destroy, force push and SSH key access while allowing safe commands" width="720">
+  <img src="demo.gif" alt="Claude Code session with Vectimus blocking rm -rf, terraform destroy and force push while allowing safe commands" width="720">
 </p>
 
 ## Install
