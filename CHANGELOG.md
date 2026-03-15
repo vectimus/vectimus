@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
 
+
+## [0.18.0] - 2026-03-15
+
+### Added
+
+- OFFENSE-001: Block autonomous offensive-research agent web_request and mcp_tool calls without human-confirmed target scope (VTMS-2026-0028)
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
