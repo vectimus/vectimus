@@ -1,0 +1,6 @@
+[pack]
+name = "supply-chain"
+version = "2.0.0"
+description = "Block supply chain attacks via package publishing, lockfile tampering, registry manipulation and untrusted dependency sources."
+author = "Vectimus"
+license = "Apache-2.0"

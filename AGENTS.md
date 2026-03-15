@@ -30,7 +30,7 @@ vectimus init                # Generate hook configs for detected AI tools
 ## Project layout
 
 ```
-policies/           # Cedar policy packs (base/, owasp-agentic/) — top-level for visibility
+policies/           # Cedar policy packs (11 domain-based dirs) — top-level for visibility
 src/vectimus/
   engine/           # Core evaluation: evaluator, normaliser, models, Cedar schema, config, loader
   adapters/         # Thin hook translators for coding tools (Claude Code, Cursor, Copilot)
@@ -87,7 +87,7 @@ docs/               # Documentation
 
 **Incident and standards-driven policies.**  Every policy rule must reference a real-world incident where possible or reference a control in a set of standards or recommendations like OWASP, etc.  Rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
 
-**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
+**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules (11 packs) with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
 
 **No telemetry.**  The open-source version sends no data anywhere.
 
@@ -95,7 +95,8 @@ docs/               # Documentation
 
 ## Cedar policy conventions
 
-- Policy IDs: `vectimus-base-NNN` or `owasp-NNN`
+- Policy IDs: `vectimus-<pack>-NNN` (e.g. `vectimus-destops-001`, `vectimus-supchain-001`, `vectimus-exfil-001`)
+- Pack short names: `destops`, `fileint`, `git`, `infra`, `secrets`, `supchain`, `db`, `mcp`, `agentgov`, `codexec`, `exfil`
 - Required annotations: `@id`, `@description`
 - Recommended annotations: `@incident`, `@controls`, `@suggested_alternative`
 - Duplicate `@id` values across packs cause a load-time error

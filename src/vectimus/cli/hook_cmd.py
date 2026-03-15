@@ -150,6 +150,15 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
         output = _deny_output(source, payload, reason)
 
     print(json.dumps(output))
+
+    # Background policy update check (non-blocking, never breaks hook)
+    try:
+        from vectimus.engine.policy_sync import check_for_updates
+
+        check_for_updates()
+    except Exception:
+        pass
+
     if source == "gemini-cli":
         sys.exit(0)
     sys.exit(2)
@@ -302,5 +311,13 @@ def hook_cmd(source: str) -> None:
         reason = decision.reason or "Denied by Vectimus"
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason)
+
+    # Background policy update check (non-blocking, never breaks hook)
+    try:
+        from vectimus.engine.policy_sync import check_for_updates
+
+        check_for_updates()
+    except Exception:
+        pass
 
     sys.exit(0)

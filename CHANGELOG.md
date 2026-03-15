@@ -9,9 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic policy updates: policies sync from `api.vectimus.com` in the background every 24 hours
+- `vectimus policy update` CLI command for manual policy sync
+- `vectimus policy status` CLI command to show policy version and sync info
+- Policy cache at `~/.vectimus/policy-cache/` overrides bundled policies when present
 - Google ADK integration: `VectimusADKPlugin` for `Runner(plugins=[...])` and `create_before_tool_callback` for per-agent callbacks
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
+
+### Changed
+
+- Policy packs reorganized from 2 packs (base, owasp-agentic) to 11 domain-based packs: destructive-ops, secrets, supply-chain, infrastructure, code-execution, data-exfiltration, file-integrity, database, git-safety, mcp-safety, agent-governance
+- Rule IDs changed from `vectimus-base-NNN`/`owasp-NNN` to `vectimus-<domain>-NNN` format
+- `evaluator.py` fallback path now uses `PolicyLoader` for dynamic pack discovery instead of hardcoded `policies/base`
+- `pack disable` confirmation prompt applies to all packs (previously only triggered for the "base" pack)
+- MCP allowlist rewriting supports both legacy (`vectimus-base-030`) and new (`vectimus-mcp-001`) rule IDs
 
 ## [0.17.0] - 2026-03-11
 

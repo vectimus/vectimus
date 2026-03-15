@@ -1,0 +1,6 @@
+[pack]
+name = "code-execution"
+version = "2.0.0"
+description = "Block reverse shells, eval patterns, download-execute chains and other remote code execution attacks."
+author = "Vectimus"
+license = "Apache-2.0"

@@ -150,7 +150,7 @@ class TestPackDisable:
         cfg = VectimusConfig(config_path)
         assert cfg.is_pack_enabled("base") is False
 
-    def test_disable_base_requires_confirmation(self, setup: tuple[str, str]) -> None:
+    def test_disable_any_pack_requires_confirmation(self, setup: tuple[str, str]) -> None:
         policy_dir, config_path = setup
         runner = CliRunner()
         result = runner.invoke(

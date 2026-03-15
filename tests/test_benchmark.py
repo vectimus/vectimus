@@ -270,12 +270,12 @@ class TestBasePackBenchmark:
 
 
 # ---------------------------------------------------------------------------
-# Tests: all packs (base + owasp-agentic)
+# Tests: all packs
 # ---------------------------------------------------------------------------
 
 
 class TestAllPacksBenchmark:
-    """Performance benchmarks with all policy packs loaded (81 rules)."""
+    """Performance benchmarks with all policy packs loaded."""
 
     @staticmethod
     def _engine() -> PolicyEngine:

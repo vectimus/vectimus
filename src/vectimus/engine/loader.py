@@ -16,6 +16,11 @@ import structlog
 
 from vectimus.engine.config import VectimusConfig
 
+try:
+    from vectimus.engine.policy_sync import get_policy_cache_dir
+except Exception:
+    get_policy_cache_dir = lambda: None  # noqa: E731
+
 logger = structlog.get_logger(__name__)
 
 
@@ -153,7 +158,9 @@ def _load_pack_manifest(pack_dir: Path) -> PackInfo | None:
 # MCP server allowlist
 # ---------------------------------------------------------------------------
 
-_MCP_ALLOWLIST_RULE_ID = "vectimus-base-030"
+# Rule ID for the MCP default-deny-all rule, which is rewritten with an
+# allowlist when MCP servers are configured.
+_MCP_ALLOWLIST_RULE_ID = "vectimus-mcp-001"
 
 # MCP server names must match this pattern to prevent Cedar injection.
 _SAFE_SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -164,8 +171,8 @@ def _validate_mcp_server_name(name: str) -> bool:
     return bool(_SAFE_SERVER_NAME_RE.match(name)) and len(name) <= 128
 
 
-def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
-    """Generate Cedar policy text for rule 030 with an allowlist.
+def _build_mcp_allowlist_cedar(allowed_servers: list[str], rule_id: str) -> str:
+    """Generate Cedar policy text for the MCP default-deny rule with an allowlist.
 
     Produces a forbid rule with an ``unless`` clause that permits calls
     to the listed servers.  When no servers are configured, the static
@@ -188,7 +195,7 @@ def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
     if not safe_servers:
         # No valid servers: return the default deny-all rule.
         return (
-            f'@id("{_MCP_ALLOWLIST_RULE_ID}")\n'
+            f'@id("{rule_id}")\n'
             '@description("Block MCP tool calls to servers not on the approved list")\n'
             '@incident("Clinejection: agent communicated with malicious MCP server that '
             'instructed it to publish backdoored packages, February 2026")\n'
@@ -204,7 +211,7 @@ def _build_mcp_allowlist_cedar(allowed_servers: list[str]) -> str:
 
     conditions = " ||\n    ".join(f'context.mcp_server == "{s}"' for s in safe_servers)
     return (
-        f'@id("{_MCP_ALLOWLIST_RULE_ID}")\n'
+        f'@id("{rule_id}")\n'
         '@description("Block MCP tool calls to servers not on the approved list")\n'
         '@incident("Clinejection: agent communicated with malicious MCP server that '
         'instructed it to publish backdoored packages, February 2026")\n'
@@ -247,11 +254,16 @@ class PolicyLoader:
             own MCP configuration through.
         """
         if policy_dirs is None:
-            # Installed package: policies bundled at vectimus/policies/
-            builtin = Path(__file__).resolve().parent.parent / "policies"
-            if not builtin.is_dir():
-                # Development (editable install): policies at repo root
-                builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
+            # Use API-downloaded policy cache if available; fall back to bundled.
+            cache_dir = get_policy_cache_dir()
+            if cache_dir is not None:
+                builtin = cache_dir
+            else:
+                # Installed package: policies bundled at vectimus/policies/
+                builtin = Path(__file__).resolve().parent.parent / "policies"
+                if not builtin.is_dir():
+                    # Development (editable install): policies at repo root
+                    builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
             external = Path.home() / ".vectimus" / "packs"
             self._policy_dirs = [builtin, external]
             if project_path is not None:
@@ -361,7 +373,9 @@ class PolicyLoader:
                         cedar_text = rule.cedar_text
                         # Rewrite MCP server allowlist rule with configured servers.
                         if rule.rule_id == _MCP_ALLOWLIST_RULE_ID and mcp_allowlist:
-                            cedar_text = _build_mcp_allowlist_cedar(mcp_allowlist)
+                            cedar_text = _build_mcp_allowlist_cedar(
+                                mcp_allowlist, rule_id=rule.rule_id
+                            )
                         parts.append(cedar_text)
                     all_rules.append(rule)
 

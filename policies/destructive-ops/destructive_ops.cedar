@@ -1,10 +1,10 @@
-// Destructive commands -- block shell commands that destroy filesystems,
-// corrupt disks or execute arbitrary remote code.
+// Destructive operations -- block shell commands that destroy filesystems,
+// corrupt disks or allow agents to bypass their own governance.
 
-@id("vectimus-base-001")
+@id("vectimus-destops-001")
 @description("Block recursive deletion of root, home or current directory")
 @incident("Home directory deletion via rm -rf reported in Claude Code sessions, 2025")
-@controls("SOC2-CC6.1, EU-AI-15")
+@controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
 @suggested_alternative("Delete specific files or directories by name instead of using broad recursive deletion.")
 forbid (
     principal,
@@ -23,10 +23,10 @@ forbid (
     context.command like "*Remove-Item*-Recurse*-Force*"
 };
 
-@id("vectimus-base-002")
+@id("vectimus-destops-002")
 @description("Block disk destruction via mkfs or dd zeroing")
 @incident("Accidental mkfs on production volume, various incident reports 2023-2025")
-@controls("SOC2-CC6.1, EU-AI-15")
+@controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
 @suggested_alternative("Use file-level operations instead of raw disk commands.  Request human approval for disk formatting.")
 forbid (
     principal,
@@ -41,10 +41,10 @@ forbid (
     context.command like "*diskpart*clean*"
 };
 
-@id("vectimus-base-003")
+@id("vectimus-destops-003")
 @description("Block fork bomb execution")
 @incident("Fork bomb denial-of-service used to crash developer workstations, various reports")
-@controls("SOC2-CC6.1, EU-AI-15")
+@controls("SOC2-CC6.1, EU-AI-15, ISO27001-A.8.6")
 @suggested_alternative("This command is a fork bomb and has no safe alternative.  It should never be executed.")
 forbid (
     principal,
@@ -54,10 +54,10 @@ forbid (
     context.command like "*:(){ :|:*"
 };
 
-@id("vectimus-base-004")
+@id("vectimus-destops-004")
 @description("Block recursive chmod 777 on root filesystem")
 @incident("chmod 777 / rendered Linux servers unbootable, multiple sysadmin post-mortems")
-@controls("SOC2-CC6.1, EU-AI-15")
+@controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.AA-05, ISO27001-A.8.2")
 @suggested_alternative("Set permissions on specific files with appropriate modes (e.g. chmod 644 for files, 755 for directories).")
 forbid (
     principal,
@@ -72,10 +72,10 @@ forbid (
     context.command like "*cacls*Everyone:F*"
 };
 
-@id("vectimus-base-005")
+@id("vectimus-destops-005")
 @description("Block disk overwrite via redirect to block device")
 @incident("Redirect to /dev/sda destroyed partition tables, data recovery incident reports")
-@controls("SOC2-CC6.1, EU-AI-15")
+@controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
 @suggested_alternative("Use file-level operations instead of writing directly to block devices.")
 forbid (
     principal,
@@ -90,51 +90,10 @@ forbid (
     context.command like "*Clear-Disk*"
 };
 
-@id("vectimus-base-006")
-@description("Block remote code execution via curl/wget piped to shell")
-@incident("Supply-chain attacks via curl|sh pattern, Clinejection February 2026")
-@controls("SOC2-CC6.6, SOC2-CC6.8, NIST-AI-MG-3.2, EU-AI-15")
-@suggested_alternative("Download the script to a file first, review its contents, then execute it after inspection.")
-forbid (
-    principal,
-    action == Vectimus::Action::"shell_command",
-    resource
-) when {
-    context.command like "*curl*| sh" ||
-    context.command like "*curl*| sh *" ||
-    context.command like "*curl*| sh;*" ||
-    context.command like "*curl*|sh" ||
-    context.command like "*curl*|sh *" ||
-    context.command like "*curl*|sh;*" ||
-    context.command like "*curl*| /bin/sh*" ||
-    context.command like "*curl*|/bin/sh*" ||
-    context.command like "*curl*| bash*" ||
-    context.command like "*curl*|bash*" ||
-    context.command like "*wget*| sh" ||
-    context.command like "*wget*| sh *" ||
-    context.command like "*wget*| sh;*" ||
-    context.command like "*wget*|sh" ||
-    context.command like "*wget*|sh *" ||
-    context.command like "*wget*|sh;*" ||
-    context.command like "*wget*| /bin/sh*" ||
-    context.command like "*wget*|/bin/sh*" ||
-    context.command like "*wget*| bash*" ||
-    context.command like "*wget*|bash*" ||
-    // Windows PowerShell -- download and execute patterns
-    context.command like "*Invoke-WebRequest*|*Invoke-Expression*" ||
-    context.command like "*Invoke-WebRequest*| iex*" ||
-    context.command like "*iwr*|*iex*" ||
-    context.command like "*IEX*(New-Object*Net.WebClient)*DownloadString*" ||
-    context.command like "*Invoke-Expression*(New-Object*Net.WebClient)*" ||
-    // Windows cmd -- certutil download-execute
-    context.command like "*certutil*-urlcache*" ||
-    context.command like "*bitsadmin*/transfer*"
-};
-
-@id("vectimus-base-021")
+@id("vectimus-destops-006")
 @description("Block agents from running vectimus CLI commands to prevent governance bypass")
 @incident("Agent attempted to disable its own governance rules after receiving deny response, 2026")
-@controls("SOC2-CC6.1, EU-AI-14")
+@controls("SOC2-CC6.1, EU-AI-14, NIST-CSF-PR.PS-01, ISO27001-A.8.9")
 @suggested_alternative("Vectimus configuration must be changed by a human administrator.  Do not attempt to modify governance settings.")
 forbid (
     principal,
