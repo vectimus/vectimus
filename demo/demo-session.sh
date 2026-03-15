@@ -22,7 +22,7 @@ slow_print() {
 }
 
 agent_text() {
-  printf "${MAGENTA}⏺${NC} "
+  printf "${MAGENTA}*${NC} "
   slow_print "$1" 0.015
   printf "\n"
   sleep 0.3
@@ -37,21 +37,21 @@ tool_call() {
 
 tool_result() {
   local text="$1"
-  printf "  ⎿  ${text}\n"
+  printf "  |${text}\n"
 }
 
 tool_deny() {
   local reason="$1"
   local policy="$2"
-  printf "  ⎿  ${RED}✗ Hook blocked: ${reason}${NC}\n"
-  printf "  ⎿  ${DIM}Policy: ${policy}${NC}\n"
+  printf "  |${RED}x Hook blocked: ${reason}${NC}\n"
+  printf "  |${DIM}Policy: ${policy}${NC}\n"
   sleep 0.6
 }
 
 clear
 printf "\n"
 printf "${DIM}╭───────────────────────────────────────────────────────────────╮${NC}\n"
-printf "${DIM}│${NC} ${MAGENTA}✻${NC} ${BOLD}Welcome to Claude Code!${NC}                                     ${DIM}│${NC}\n"
+printf "${DIM}│${NC} ${MAGENTA}*${NC} ${BOLD}Welcome to Claude Code!${NC}                                     ${DIM}│${NC}\n"
 printf "${DIM}│${NC}                                                               ${DIM}│${NC}\n"
 printf "${DIM}│${NC}   ${DIM}with Vectimus governance${NC}                                     ${DIM}│${NC}\n"
 printf "${DIM}╰───────────────────────────────────────────────────────────────╯${NC}\n"
