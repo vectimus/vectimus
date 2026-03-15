@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
 
+
+## [0.18.0] - 2026-03-15
+
+### Added
+
+- INFRA-002: Block AWS CLI environment-destructive verbs (terminate-instances, delete-stack, delete-cluster, delete-db-instance, delete-vpc and related) without human approval token (VTMS-2026-0027)
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
