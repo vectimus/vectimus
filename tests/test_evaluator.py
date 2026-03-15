@@ -13,7 +13,7 @@ class TestCedarEvaluator:
         event = make_event(command="rm -rf /")
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-destops-001" in decision.matched_policy_ids
+        assert "vectimus-destruct-001" in decision.matched_policy_ids
         assert decision.suggested_alternative is not None
 
     def test_rm_rf_home_denied(self, engine: PolicyEngine, make_event) -> None:

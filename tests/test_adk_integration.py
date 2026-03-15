@@ -149,7 +149,9 @@ class TestVectimusADKPlugin:
         """The denial dict should reference the matched policy."""
         ctx = MagicMock()
         result = plugin.before_tool_callback(ctx, "bash", {"command": "rm -rf /"})
-        assert "vectimus-destops-001" in result["error"] or "Blocked by Vectimus" in result["error"]
+        assert (
+            "vectimus-destruct-001" in result["error"] or "Blocked by Vectimus" in result["error"]
+        )
 
     def test_observe_mode_allows_denied_action(self, plugin_observe) -> None:
         """In observe mode, a would-be-denied action should return None (allow)."""

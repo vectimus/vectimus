@@ -1,7 +1,7 @@
 // Destructive operations -- block shell commands that destroy filesystems,
 // corrupt disks or allow agents to bypass their own governance.
 
-@id("vectimus-destops-001")
+@id("vectimus-destruct-001")
 @description("Block recursive deletion of root, home or current directory")
 @incident("Home directory deletion via rm -rf reported in Claude Code sessions, 2025")
 @controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
@@ -23,7 +23,7 @@ forbid (
     context.command like "*Remove-Item*-Recurse*-Force*"
 };
 
-@id("vectimus-destops-002")
+@id("vectimus-destruct-002")
 @description("Block disk destruction via mkfs or dd zeroing")
 @incident("Accidental mkfs on production volume, various incident reports 2023-2025")
 @controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
@@ -41,7 +41,7 @@ forbid (
     context.command like "*diskpart*clean*"
 };
 
-@id("vectimus-destops-003")
+@id("vectimus-destruct-003")
 @description("Block fork bomb execution")
 @incident("Fork bomb denial-of-service used to crash developer workstations, various reports")
 @controls("SOC2-CC6.1, EU-AI-15, ISO27001-A.8.6")
@@ -54,7 +54,7 @@ forbid (
     context.command like "*:(){ :|:*"
 };
 
-@id("vectimus-destops-004")
+@id("vectimus-destruct-004")
 @description("Block recursive chmod 777 on root filesystem")
 @incident("chmod 777 / rendered Linux servers unbootable, multiple sysadmin post-mortems")
 @controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.AA-05, ISO27001-A.8.2")
@@ -72,7 +72,7 @@ forbid (
     context.command like "*cacls*Everyone:F*"
 };
 
-@id("vectimus-destops-005")
+@id("vectimus-destruct-005")
 @description("Block disk overwrite via redirect to block device")
 @incident("Redirect to /dev/sda destroyed partition tables, data recovery incident reports")
 @controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.9")
@@ -90,7 +90,7 @@ forbid (
     context.command like "*Clear-Disk*"
 };
 
-@id("vectimus-destops-006")
+@id("vectimus-destruct-006")
 @description("Block agents from running vectimus CLI commands to prevent governance bypass")
 @incident("Agent attempted to disable its own governance rules after receiving deny response, 2026")
 @controls("SOC2-CC6.1, EU-AI-14, NIST-CSF-PR.PS-01, ISO27001-A.8.9")

@@ -95,8 +95,8 @@ docs/               # Documentation
 
 ## Cedar policy conventions
 
-- Policy IDs: `vectimus-<pack>-NNN` (e.g. `vectimus-destops-001`, `vectimus-supchain-001`, `vectimus-exfil-001`)
-- Pack short names: `destops`, `fileint`, `git`, `infra`, `secrets`, `supchain`, `db`, `mcp`, `agentgov`, `codexec`, `exfil`
+- Policy IDs: `vectimus-<pack>-NNN` (e.g. `vectimus-destruct-001`, `vectimus-supchain-001`, `vectimus-exfil-001`)
+- Pack short names: `destruct`, `fileint`, `git`, `infra`, `secrets`, `supchain`, `db`, `mcp`, `agentgov`, `codexec`, `exfil`
 - Required annotations: `@id`, `@description`
 - Recommended annotations: `@incident`, `@controls`, `@suggested_alternative`
 - Duplicate `@id` values across packs cause a load-time error

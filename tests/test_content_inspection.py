@@ -37,7 +37,7 @@ class TestFileWriteContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-destops-001" in decision.matched_policy_ids
+        assert "vectimus-destruct-001" in decision.matched_policy_ids
 
     def test_write_disk_overwrite_denied(self, engine, make_event) -> None:
         event = make_event(
@@ -48,7 +48,7 @@ class TestFileWriteContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-destops-002" in decision.matched_policy_ids
+        assert "vectimus-destruct-002" in decision.matched_policy_ids
 
     def test_write_normal_code_allowed(self, engine, make_event) -> None:
         event = make_event(
@@ -144,7 +144,7 @@ class TestScriptExecutionContentInspection:
         )
         decision = engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-destops-002" in decision.matched_policy_ids
+        assert "vectimus-destruct-002" in decision.matched_policy_ids
 
     def test_no_script_content_allowed(self, engine, make_event) -> None:
         """Script file not found -> no second pass -> allowed."""

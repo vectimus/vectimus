@@ -252,8 +252,8 @@ Review the audit log at `~/.vectimus/logs/` to understand what your policies wou
 ## Per-project overrides
 
 ```bash
-vectimus rule disable vectimus-destops-003              # This project only
-vectimus rule disable vectimus-destops-003 --global     # All projects
+vectimus rule disable vectimus-destruct-003              # This project only
+vectimus rule disable vectimus-destruct-003 --global     # All projects
 vectimus rule overrides                                  # View overrides
 ```
 
