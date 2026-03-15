@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import json
 import os
-import threading
+import re
+import shutil
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -34,6 +37,7 @@ DEFAULT_API_URL = "https://api.vectimus.com"
 _CACHE_DIR = Path.home() / ".vectimus" / "policy-cache"
 _SYNC_META_PATH = Path.home() / ".vectimus" / "policy-sync.json"
 _REQUEST_TIMEOUT = 5  # seconds
+_SAFE_PACK_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +123,12 @@ def _write_pack(pack_dir: Path, pack_name: str, version: str, cedar_source: str)
     """
     pack_dir.mkdir(parents=True, exist_ok=True)
 
+    # Validate inputs to prevent TOML injection.
+    if not _SAFE_PACK_NAME_RE.match(pack_name) or len(pack_name) > 64:
+        raise ValueError(f"Invalid pack name: {pack_name!r}")
+    if not re.match(r"^[a-zA-Z0-9._-]+$", version) or len(version) > 32:
+        raise ValueError(f"Invalid version: {version!r}")
+
     # pack.toml
     toml_content = (
         "[pack]\n"
@@ -155,10 +165,13 @@ def _download_policies(*, api_url: str = DEFAULT_API_URL) -> SyncResult:
     total_policies: int = data.get("total_policies", len(policies))
     total_rules: int = data.get("total_rules", 0)
 
-    # Group policies by pack name.
+    # Group policies by pack name, validating each name.
     packs: dict[str, list[str]] = {}
     for policy in policies:
         pack_name = policy.get("pack", "default")
+        if not _SAFE_PACK_NAME_RE.match(pack_name) or len(pack_name) > 64:
+            logger.warning("policy_sync_invalid_pack_name", pack_name=pack_name)
+            continue
         source = policy.get("source", "")
         if source:
             packs.setdefault(pack_name, []).append(source)
@@ -170,10 +183,19 @@ def _download_policies(*, api_url: str = DEFAULT_API_URL) -> SyncResult:
     # Write each pack to disk.
     packs_updated: dict[str, int] = {}
     for pack_name, sources in packs.items():
-        pack_dir = _CACHE_DIR / pack_name
+        pack_dir = (_CACHE_DIR / pack_name).resolve()
+        if not pack_dir.is_relative_to(_CACHE_DIR.resolve()):
+            logger.warning("policy_sync_path_traversal", pack_name=pack_name)
+            continue
         cedar_text = "\n\n".join(sources)
         _write_pack(pack_dir, pack_name, version, cedar_text)
         packs_updated[pack_name] = len(sources)
+
+    # Remove stale packs that are no longer in the API response.
+    if _CACHE_DIR.exists():
+        for existing in _CACHE_DIR.iterdir():
+            if existing.is_dir() and existing.name not in packs:
+                shutil.rmtree(existing, ignore_errors=True)
 
     # Update sync metadata.
     _write_sync_meta(
@@ -213,6 +235,20 @@ def sync_policies(*, api_url: str = DEFAULT_API_URL) -> SyncResult:
         )
 
 
+def _should_check_updates(check_interval_hours: int = 24) -> bool:
+    """Return True if enough time has elapsed since the last update check."""
+    meta = _read_sync_meta()
+    last_check_str = meta.get("last_check")
+    if not last_check_str:
+        return True
+    try:
+        last_check = datetime.fromisoformat(last_check_str.replace("Z", "+00:00"))
+        elapsed = datetime.now(UTC) - last_check
+        return elapsed.total_seconds() >= check_interval_hours * 3600
+    except (ValueError, TypeError):
+        return True
+
+
 def check_for_updates(
     *,
     api_url: str = DEFAULT_API_URL,
@@ -220,50 +256,26 @@ def check_for_updates(
 ) -> None:
     """Non-blocking check for policy updates.
 
-    Spawns a daemon thread that:
-    1. Reads ``~/.vectimus/policy-sync.json``. If the last check was within
-       *check_interval_hours*, returns immediately.
-    2. Hits ``/api/policies/stats`` and compares the reported version to the
-       cached version.
-    3. If a newer version is available, downloads the full policy set.
+    Spawns a detached subprocess that runs ``vectimus policy update`` so
+    the update can complete even after the hook process exits. The check
+    is skipped if the last successful check was within
+    *check_interval_hours*.
 
-    All errors are silently caught and logged so this never disrupts
-    normal hook evaluation.
+    All errors are silently caught so this never disrupts hook evaluation.
     """
+    try:
+        if not _should_check_updates(check_interval_hours):
+            return
 
-    def _run() -> None:
-        try:
-            meta = _read_sync_meta()
-            last_check_str = meta.get("last_check")
-            if last_check_str:
-                try:
-                    last_check = datetime.fromisoformat(last_check_str.replace("Z", "+00:00"))
-                    elapsed = datetime.now(UTC) - last_check
-                    if elapsed.total_seconds() < check_interval_hours * 3600:
-                        return
-                except (ValueError, TypeError):
-                    pass  # Corrupted timestamp — proceed with check.
-
-            stats = _api_get(f"{api_url}/api/policies/stats")
-            remote_version = stats.get("version", "")
-            cached_version = meta.get("version", "")
-
-            if remote_version and remote_version != cached_version:
-                logger.info(
-                    "policy_update_available",
-                    cached=cached_version,
-                    remote=remote_version,
-                )
-                _download_policies(api_url=api_url)
-            else:
-                # No update needed — just touch last_check.
-                meta["last_check"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                _write_sync_meta(meta)
-        except Exception as exc:
-            logger.debug("policy_update_check_failed", error=str(exc))
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+        # Spawn a detached subprocess that outlives the hook process.
+        subprocess.Popen(
+            [sys.executable, "-m", "vectimus.cli", "policy", "update"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        logger.debug("policy_update_check_failed", error=str(exc))
 
 
 # ---------------------------------------------------------------------------

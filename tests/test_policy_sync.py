@@ -15,6 +15,7 @@ from vectimus.engine.policy_sync import (
     SyncStatus,
     _api_get,
     _read_sync_meta,
+    _should_check_updates,
     _write_sync_meta,
     check_for_updates,
     get_policy_cache_dir,
@@ -261,109 +262,47 @@ class TestSyncPolicies:
 # ---------------------------------------------------------------------------
 
 
+class TestShouldCheckUpdates:
+    """Test the interval-based check logic."""
+
+    def test_returns_true_when_no_metadata(self) -> None:
+        assert _should_check_updates(check_interval_hours=24) is True
+
+    def test_returns_false_when_recently_checked(self) -> None:
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _write_sync_meta({"version": "1.0.0", "last_check": now})
+        assert _should_check_updates(check_interval_hours=24) is False
+
+    def test_returns_true_when_check_expired(self) -> None:
+        _write_sync_meta({"version": "1.0.0", "last_check": "2020-01-01T00:00:00Z"})
+        assert _should_check_updates(check_interval_hours=1) is True
+
+    def test_returns_true_when_corrupted_timestamp(self) -> None:
+        _write_sync_meta({"version": "1.0.0", "last_check": "not-a-date"})
+        assert _should_check_updates(check_interval_hours=24) is True
+
+
 class TestCheckForUpdates:
     """Test non-blocking background update checks."""
 
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_spawns_daemon_thread(self, mock_get: MagicMock) -> None:
-        mock_get.return_value = {"version": "1.0.0"}
-
+    @patch("subprocess.Popen")
+    def test_spawns_subprocess_when_check_needed(self, mock_popen: MagicMock) -> None:
+        # No metadata — check should be triggered.
         check_for_updates(api_url="https://fake.api")
-        # Give the thread a moment to start.
-        import time
+        mock_popen.assert_called_once()
 
-        time.sleep(0.1)
-        # The thread is a daemon and may have finished, so we just verify
-        # no exception was raised and the function returned immediately.
-        assert True
-
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_skips_when_recently_checked(self, mock_get: MagicMock) -> None:
-        # Write metadata with a recent last_check timestamp.
+    @patch("subprocess.Popen")
+    def test_skips_when_recently_checked(self, mock_popen: MagicMock) -> None:
         now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         _write_sync_meta({"version": "1.0.0", "last_check": now})
 
         check_for_updates(api_url="https://fake.api", check_interval_hours=24)
-        # Wait for the background thread.
-        import time
+        mock_popen.assert_not_called()
 
-        time.sleep(0.2)
-
-        # API should NOT have been called because check was recent.
-        mock_get.assert_not_called()
-
-    @patch("vectimus.engine.policy_sync._download_policies")
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_downloads_when_newer_version_available(
-        self, mock_get: MagicMock, mock_download: MagicMock
-    ) -> None:
-        # Old metadata with an expired last_check.
-        _write_sync_meta(
-            {
-                "version": "1.0.0",
-                "last_check": "2020-01-01T00:00:00Z",
-            }
-        )
-        mock_get.return_value = {"version": "2.0.0"}
-        mock_download.return_value = SyncResult(version="2.0.0", total_policies=1, total_rules=1)
-
-        check_for_updates(api_url="https://fake.api", check_interval_hours=1)
-        import time
-
-        time.sleep(0.3)
-
-        mock_get.assert_called_once_with("https://fake.api/api/policies/stats")
-        mock_download.assert_called_once_with(api_url="https://fake.api")
-
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_no_download_when_same_version(self, mock_get: MagicMock, tmp_path: Path) -> None:
-        _write_sync_meta(
-            {
-                "version": "1.0.0",
-                "last_check": "2020-01-01T00:00:00Z",
-            }
-        )
-        mock_get.return_value = {"version": "1.0.0"}
-
-        check_for_updates(api_url="https://fake.api", check_interval_hours=1)
-        import time
-
-        time.sleep(0.3)
-
-        # API was called for stats, but no download should have happened.
-        mock_get.assert_called_once()
-        # Verify last_check was updated (touch).
-        meta = json.loads((tmp_path / "policy-sync.json").read_text())
-        assert meta["last_check"] != "2020-01-01T00:00:00Z"
-
-    @patch("vectimus.engine.policy_sync._download_policies")
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_no_metadata_triggers_check(
-        self, mock_get: MagicMock, mock_download: MagicMock
-    ) -> None:
-        # remote != cached ("1.0.0" != "") so download will be triggered.
-        mock_get.return_value = {"version": "1.0.0"}
-        mock_download.return_value = SyncResult(version="1.0.0", total_policies=1, total_rules=1)
-
+    @patch("subprocess.Popen", side_effect=OSError("spawn failed"))
+    def test_error_silently_caught(self, mock_popen: MagicMock) -> None:
+        # Should not raise even though Popen fails.
         check_for_updates(api_url="https://fake.api")
-        import time
-
-        time.sleep(0.3)
-
-        # With no metadata, the thread should call the stats API.
-        mock_get.assert_called_once_with("https://fake.api/api/policies/stats")
-        # And trigger a download since cached version is empty.
-        mock_download.assert_called_once()
-
-    @patch("vectimus.engine.policy_sync._api_get")
-    def test_network_error_silently_caught(self, mock_get: MagicMock) -> None:
-        mock_get.side_effect = ConnectionError("offline")
-
-        # Should not raise even though the thread hits an error.
-        check_for_updates(api_url="https://fake.api")
-        import time
-
-        time.sleep(0.3)
 
 
 # ---------------------------------------------------------------------------

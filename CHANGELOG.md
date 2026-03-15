@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic policy updates: policies sync from `api.vectimus.com` in the background every 24 hours
 - `vectimus policy update` CLI command for manual policy sync
 - `vectimus policy status` CLI command to show policy version and sync info
-- Policy cache at `~/.vectimus/policy-cache/` overrides bundled policies when present
+- Policy cache at `~/.vectimus/policy-cache/` supplements bundled policies (cached packs override bundled packs with matching names)
 - Google ADK integration: `VectimusADKPlugin` for `Runner(plugins=[...])` and `create_before_tool_callback` for per-agent callbacks
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies

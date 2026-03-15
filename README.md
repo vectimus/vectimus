@@ -1,6 +1,6 @@
 # Vectimus
 
-**Deterministic governance for AI coding agents and agentic frameworks.** Cedar policies evaluate every agent action in under 5ms. No config. No account. No data leaves your machine.
+**Deterministic governance for AI coding agents and agentic frameworks.** Cedar policies evaluate every agent action in under 5ms. No config. No account.
 
 [![PyPI](https://img.shields.io/pypi/v/vectimus)](https://pypi.org/project/vectimus/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -213,7 +213,7 @@ agent = LlmAgent(
 - **Cedar Engine** evaluates all loaded policies deterministically. No LLM in the loop. Same input, same decision.
 - **Audit Log** records every decision with full context for compliance evidence and incident investigation
 
-Evaluation is local-only by default. Zero network calls. Zero telemetry. [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
+Evaluation is entirely local. Zero telemetry. The only network call is a background policy update check every 24 hours (disable with `vectimus policy auto-update off`). [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
 
 ## MCP server governance
 
