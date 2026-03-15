@@ -52,7 +52,7 @@ Every policy references the real-world incident that motivated it. No "best prac
 
 11 packs. [Browse all policies →](https://vectimus.com/policies)
 
-Maps to [OWASP Agentic Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (9 of 10 categories), SOC 2, NIST AI RMF, NIST CSF 2.0, ISO 27001 and EU AI Act. [Full compliance mappings →](https://vectimus.com/docs/compliance)
+Maps to [OWASP Agentic Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (all 10 categories), SOC 2, NIST AI RMF, NIST CSF 2.0, ISO 27001 and EU AI Act. [Full compliance mappings →](https://vectimus.com/docs/compliance)
 
 ## Example policy
 

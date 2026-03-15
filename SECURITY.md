@@ -9,7 +9,7 @@ If you discover a security vulnerability in Vectimus, please report it responsib
 Instead, please use one of the following methods:
 
 1. **GitHub Security Advisories**: Use the "Report a vulnerability" button on the [Security tab](https://github.com/Vectimus/vectimus/security/advisories) of this repository.
-2. **Email**: Send details to security@vectimus.dev.
+2. **Email**: Send details to security@vectimus.com.
 
 ## What to Include
 

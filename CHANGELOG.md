@@ -92,7 +92,7 @@ Initial public release.
 
 - Cedar-based policy engine with deterministic evaluation (<50ms p99)
 - 52 rules in base pack covering destructive operations, CI/CD protection, credential safety, recursive deletion and more
-- 29 rules in OWASP Agentic pack (ASI01-ASI10, 9 of 10 enforced)
+- 29 rules in OWASP Agentic pack (ASI01-ASI10, all 10 enforced)
 - Native hook integration for Claude Code, Cursor and GitHub Copilot
 - `vectimus rule list`, `rule show`, `rule disable`, `rule enable` CLI
 - `vectimus status` with tool detection and audit statistics
