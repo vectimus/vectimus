@@ -38,4 +38,4 @@ The following are in scope:
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| Latest  | Yes       |
