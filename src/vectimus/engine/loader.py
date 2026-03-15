@@ -16,6 +16,11 @@ import structlog
 
 from vectimus.engine.config import VectimusConfig
 
+try:
+    from vectimus.engine.policy_sync import get_policy_cache_dir
+except Exception:
+    get_policy_cache_dir = lambda: None  # noqa: E731
+
 logger = structlog.get_logger(__name__)
 
 
@@ -249,11 +254,16 @@ class PolicyLoader:
             own MCP configuration through.
         """
         if policy_dirs is None:
-            # Installed package: policies bundled at vectimus/policies/
-            builtin = Path(__file__).resolve().parent.parent / "policies"
-            if not builtin.is_dir():
-                # Development (editable install): policies at repo root
-                builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
+            # Use API-downloaded policy cache if available; fall back to bundled.
+            cache_dir = get_policy_cache_dir()
+            if cache_dir is not None:
+                builtin = cache_dir
+            else:
+                # Installed package: policies bundled at vectimus/policies/
+                builtin = Path(__file__).resolve().parent.parent / "policies"
+                if not builtin.is_dir():
+                    # Development (editable install): policies at repo root
+                    builtin = Path(__file__).resolve().parent.parent.parent.parent / "policies"
             external = Path.home() / ".vectimus" / "packs"
             self._policy_dirs = [builtin, external]
             if project_path is not None:

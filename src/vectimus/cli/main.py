@@ -11,6 +11,7 @@ import click
 from vectimus.cli.hook_cmd import hook_cmd
 from vectimus.cli.init_cmd import init_cmd
 from vectimus.cli.pack_cmd import pack_cmd
+from vectimus.cli.policy_cmd import policy_cmd
 from vectimus.cli.remove_cmd import remove_cmd
 from vectimus.cli.rule_cmd import rule_cmd
 from vectimus.cli.server_cmd import server_cmd
@@ -124,3 +125,4 @@ cli.add_command(rule_cmd, name="rule")
 cli.add_command(server_cmd, name="server")
 cli.add_command(observe_cmd, name="observe")
 cli.add_command(mcp_cmd, name="mcp")
+cli.add_command(policy_cmd, name="policy")
