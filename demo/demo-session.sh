@@ -50,11 +50,10 @@ tool_deny() {
 
 clear
 printf "\n"
-printf "${DIM}╭───────────────────────────────────────────────────────────────╮${NC}\n"
-printf "${DIM}│${NC} ${MAGENTA}*${NC} ${BOLD}Welcome to Claude Code!${NC}                                     ${DIM}│${NC}\n"
-printf "${DIM}│${NC}                                                               ${DIM}│${NC}\n"
-printf "${DIM}│${NC}   ${DIM}with Vectimus governance${NC}                                     ${DIM}│${NC}\n"
-printf "${DIM}╰───────────────────────────────────────────────────────────────╯${NC}\n"
+printf "${DIM}+------------------------------------------+${NC}\n"
+printf "${DIM}|${NC} ${MAGENTA}*${NC} ${BOLD}Welcome to Claude Code!${NC}                ${DIM}|${NC}\n"
+printf "${DIM}|${NC}   ${DIM}with Vectimus governance${NC}               ${DIM}|${NC}\n"
+printf "${DIM}+------------------------------------------+${NC}\n"
 printf "\n"
 sleep 1
 
