@@ -22,7 +22,7 @@ slow_print() {
 }
 
 agent_text() {
-  printf "${MAGENTA}o${NC} "
+  printf "${MAGENTA}●${NC} "
   slow_print "$1" 0.015
   printf "\n"
   sleep 0.3
