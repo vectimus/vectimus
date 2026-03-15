@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
 
+
+## [0.18.0] - 2026-03-15
+
+### Added
+
+- SUPPLY-001: Block vulnerable langchain-core version pins (CVE-2025-68664, CVSS 9.3) and base64-encoded exfiltration web requests (VTMS-2026-0032)
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
