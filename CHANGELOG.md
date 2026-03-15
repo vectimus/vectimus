@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
 
+
+## [0.18.0] - 2026-03-15
+
+### Added
+
+- REPO-001, REPO-002: Block ANTHROPIC_BASE_URL API key interception (CVE-2026-21852) and .claude/hooks RCE execution (CVE-2025-59536) (VTMS-2026-0030)
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
