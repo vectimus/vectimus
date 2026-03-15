@@ -158,3 +158,72 @@ forbid (
     context.file_path like "*.cursor/hooks.json" ||
     context.file_path like "*.vectimus/*"
 };
+
+
+// ---------------------------------------------------------------------------
+// Git MCP server input validation (CVE-2025-68143 / CVE-2025-68144)
+//
+// Three prompt-injection vulnerabilities in Anthropic's mcp-server-git were
+// patched in v2025.12.18.  GIT-001 and GIT-002 provide defence-in-depth for
+// operators who have allowlisted mcp-server-git (vectimus-base-030 already
+// blocks all MCP tool calls to unapproved servers).
+//
+// PREREQUISITE: operators must run mcp-server-git >= v2025.12.18 before adding
+// it to the approved list.  v2025.12.18 removes git_init entirely (CVE-2025-68143)
+// and fixes argument sanitisation (CVE-2025-68144/68145).
+// ---------------------------------------------------------------------------
+
+// VTMS-2026-0033 | OWASP: LLM09 Insecure Tool Use | SOC 2: CC6.1 | NIST AI RMF: MS-2.5
+// EU AI Act: Art. 15 | CIS: 2.2, 2.5, 16.1, 16.7
+// CVE-2025-68143 (CVSS 8.8): mcp-server-git git_init accepts arbitrary filesystem paths
+// without validation, allowing any directory to be initialised as a git repo.
+// Exploitable via prompt injection in malicious README or GitHub issues.
+
+@id("GIT-001")
+@description("Block git_init MCP tool calls with path traversal or absolute paths outside workspace (CVE-2025-68143)")
+@incident("VTMS-2026-0033: CVE-2025-68143 — mcp-server-git git_init arbitrary path traversal, January 2026")
+@controls("OWASP-LLM09, SOC2-CC6.1, NIST-AI-MS-2.5, EU-AI-15, CIS-2.2, CIS-2.5, CIS-16.7")
+@suggested_alternative("Use only relative paths within the current workspace for git_init.  Upgrade mcp-server-git to >=v2025.12.18 which removes git_init entirely.")
+forbid (
+    principal,
+    action == Vectimus::Action::"mcp_tool",
+    resource
+) when {
+    context.mcp_tool like "*git_init*" &&
+    context has file_path &&
+    (
+        context.file_path like "*../*"  ||
+        context.file_path like "*/..*"  ||
+        context.file_path like "/*"
+    )
+};
+
+// VTMS-2026-0033 | OWASP: LLM09 Insecure Tool Use | SOC 2: CC6.1 | NIST AI RMF: MS-2.5
+// EU AI Act: Art. 15 | CIS: 2.2, 16.1, 16.7
+// CVE-2025-68144 (CVSS 8.1): mcp-server-git git_diff and git_checkout pass user-controlled
+// arguments directly to the git CLI without sanitisation, enabling file overwrites and
+// argument injection / command execution.  Exploitable via prompt injection.
+
+@id("GIT-002")
+@description("Block git_diff and git_checkout MCP tool calls with shell metacharacters in arguments (CVE-2025-68144)")
+@incident("VTMS-2026-0033: CVE-2025-68144 — mcp-server-git git_diff/git_checkout argument injection enables file overwrite and code execution, January 2026")
+@controls("OWASP-LLM09, SOC2-CC6.1, NIST-AI-MS-2.5, EU-AI-15, CIS-2.2, CIS-16.1")
+@suggested_alternative("Ensure git operation arguments contain only branch names, file paths and standard flags.  Upgrade mcp-server-git to >=v2025.12.18 which fixes argument sanitisation.")
+forbid (
+    principal,
+    action == Vectimus::Action::"mcp_tool",
+    resource
+) when {
+    (
+        context.mcp_tool like "*git_diff*"     ||
+        context.mcp_tool like "*git_checkout*"
+    ) &&
+    context has command &&
+    (
+        context.command like "*;*"    ||
+        context.command like "* && *" ||
+        context.command like "* || *" ||
+        context.command like "*`*"    ||
+        context.command like "*$(*"
+    )
+};

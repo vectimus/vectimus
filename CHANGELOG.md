@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pip install vectimus[adk]` extras group (requires `google-adk>=1.0.0`)
 - `pip install vectimus[all]` extras group installs all integration dependencies
 
+
+## [0.17.1] - 2026-03-15
+
+### Changed
+
+- GIT-001, GIT-002: Extend mcp_tools — block mcp-server-git path traversal (CVE-2025-68143) and argument injection (CVE-2025-68144) for allowlisted git MCP servers (VTMS-2026-0033)
+
 ## [0.17.0] - 2026-03-11
 
 ### Added
