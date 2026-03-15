@@ -7,7 +7,9 @@
 [![CI](https://github.com/vectimus/vectimus/actions/workflows/ci.yml/badge.svg)](https://github.com/vectimus/vectimus/actions)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://pypi.org/project/vectimus/)
 
-<!-- TODO: Add demo GIF showing agent denied on dangerous command, allowed on safe command -->
+<p align="center">
+  <img src="demo.gif" alt="Vectimus blocking rm -rf, terraform destroy, force push and SSH key access while allowing safe commands" width="720">
+</p>
 
 ## Install
 
