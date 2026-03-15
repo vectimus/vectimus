@@ -15,7 +15,7 @@ cd "$REPO_DIR"
 
 echo "Recording demo with asciinema..."
 asciinema rec "$CAST_FILE" \
-  --cols 90 \
+  --cols 80 \
   --rows 24 \
   --command "bash $SCRIPT_DIR/demo-session.sh" \
   --overwrite
@@ -24,7 +24,7 @@ echo ""
 echo "Converting to GIF with agg..."
 agg "$CAST_FILE" "$GIF_FILE" \
   --theme monokai \
-  --font-size 16 \
+  --font-size 14 \
   --speed 1
 
 echo "Done! GIF saved to $GIF_FILE"
