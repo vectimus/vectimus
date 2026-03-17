@@ -15,7 +15,7 @@ cd "$REPO_DIR"
 
 echo "Recording demo with asciinema..."
 asciinema rec "$CAST_FILE" \
-  --cols 80 \
+  --cols 100 \
   --rows 24 \
   --command "bash $SCRIPT_DIR/demo-session.sh" \
   --overwrite

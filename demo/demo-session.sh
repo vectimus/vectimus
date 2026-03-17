@@ -48,6 +48,12 @@ tool_deny() {
   sleep 0.6
 }
 
+tool_suggest() {
+  local text="$1"
+  printf "  |${CYAN}> Suggested alternative: ${text}${NC}\n"
+  sleep 0.4
+}
+
 clear
 printf "\n"
 printf "${DIM}╭──────────────────────────────────────────────────────────────╮${NC}\n"
@@ -76,6 +82,7 @@ agent_text "Let me tear down the old staging environment."
 
 tool_call "Bash" "terraform destroy -auto-approve"
 tool_deny "Block terraform destroy without explicit approval" "vectimus-infra-001"
+tool_suggest "Use terraform plan to preview changes, then request human approval"
 printf "\n"
 sleep 0.4
 
