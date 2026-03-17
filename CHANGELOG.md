@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-03-17
+
 ### Added
 
 - Automatic policy updates: policies sync from `api.vectimus.com` in the background every 24 hours
@@ -24,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `evaluator.py` fallback path now uses `PolicyLoader` for dynamic pack discovery instead of hardcoded `policies/base`
 - `pack disable` confirmation prompt applies to all packs (previously only triggered for the "base" pack)
 - MCP allowlist rewriting uses new `vectimus-mcp-001` rule ID
+
+### Fixed
+
+- MCP server detection now checks all Claude Code config locations: project `.mcp.json`, project `.claude/mcp.json`, user `~/.claude.json` and user `~/.claude/mcp.json`
 
 ## [0.17.0] - 2026-03-11
 
