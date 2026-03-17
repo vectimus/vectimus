@@ -87,7 +87,7 @@ Behind the scenes, [Sentinel](https://github.com/vectimus/sentinel) runs a three
 - **Security Engineer** drafts Cedar policies and replays the incident in a sandbox to prove the policy catches the attack before opening a PR
 - **Threat Analyst** writes the advisory and incident analysis for the [public threat feed](https://vectimus.com/threats)
 
-A human reviews every PR. The policy ships. Your install picks it up automatically.
+A human reviews every PR. The policy ships. The package is updated and users can either run `vectimus policy update` manually or enable auto policy updates.
 
 The entire pipeline is governed by Vectimus itself. The agents that write governance rules operate under the same governance system.
 
