@@ -89,7 +89,7 @@ docs/               # Documentation
 
 **Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules (11 packs) with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
 
-**No telemetry.**  The open-source version sends no usage data.  The only network call is a background policy update check every 24 hours that contacts `api.vectimus.com` to fetch new policies.  This sends the installed version via the User-Agent header.  No other data leaves the machine.
+**No telemetry.**  The open-source version sends no usage data and makes no network calls by default.  An opt-in policy sync feature can be enabled via ``[updates] auto_sync = true`` in ``~/.vectimus/config.toml`` to fetch updated policies from ``api.vectimus.com``.  When enabled it sends the installed version via the User-Agent header.  No other data leaves the machine.
 
 **Escalation is simple (MVP).**  ESCALATE is always denied at the hook level.  The hook returns exit code 2 with a reason stating the action requires human approval.  No Slack, no approval workflows yet.  In future the enterprise tier will support out-of-band approval (Slack, ServiceNow, PagerDuty) where the hook denies, the approval happens asynchronously and the developer retries after approval.  The invariant that must never change: ESCALATE produces a deny at the hook.  Approval never happens inline.
 

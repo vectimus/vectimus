@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-03-17
+
+### Changed
+
+- Automatic policy sync is now opt-in (disabled by default). Enable via `[updates] auto_sync = true` in `~/.vectimus/config.toml` or `VECTIMUS_AUTO_SYNC=true` environment variable. A security governance tool should not phone home without explicit consent.
+- Sync URL and interval are now configurable via `[updates]` config section or environment variables (`VECTIMUS_SYNC_URL`, `VECTIMUS_SYNC_INTERVAL`)
+
 ## [0.18.0] - 2026-03-17
 
 ### Added
 
-- Automatic policy updates: policies sync from `api.vectimus.com` in the background every 24 hours
+- Policy update system: policies sync from `api.vectimus.com` via `vectimus policy update` CLI or opt-in background sync
 - `vectimus policy update` CLI command for manual policy sync
 - `vectimus policy status` CLI command to show policy version and sync info
 - Policy cache at `~/.vectimus/policy-cache/` supplements bundled policies (cached packs override bundled packs with matching names)
