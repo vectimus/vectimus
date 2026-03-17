@@ -1,0 +1,63 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude[bot]"
+          claude_args: "--dangerously-skip-permissions"
+          show_full_output: true
+          prompt: |
+            You are triaging issue #${{ github.event.issue.number }} in ${{ github.repository }}.
+
+            Issue title: ${{ github.event.issue.title }}
+            Issue body: ${{ github.event.issue.body }}
+            Current labels: ${{ join(github.event.issue.labels.*.name, ', ') }}
+
+            ## Step 1: Label the issue
+
+            If the issue already has labels, skip this step.
+
+            Otherwise, read the issue carefully and apply exactly ONE of these labels using the gh CLI:
+            - "bug" — something is broken or not working as expected
+            - "enhancement" — a new feature or improvement request
+            - "documentation" — docs improvements or additions
+            - "question" — a question needing clarification
+
+            Command: gh issue edit ${{ github.event.issue.number }} --add-label "<label>"
+
+            ## Step 2: Decide what to do
+
+            If the label is "enhancement", "documentation", or "question":
+            - Leave a brief, helpful comment acknowledging the issue
+            - Exit. Do not attempt a fix.
+
+            If the label is "bug":
+            - Investigate the codebase to understand the root cause
+            - Create a fix on a new branch named "fix/issue-${{ github.event.issue.number }}"
+            - Write clean, minimal changes that fix the bug
+            - Run the test suite with `uv run pytest` to verify nothing is broken
+            - Commit with a message referencing the issue (e.g. "Fix #${{ github.event.issue.number }}: <description>")
+            - Push the branch and open a PR targeting main using:
+              gh pr create --title "Fix #${{ github.event.issue.number }}: <short description>" --body "Closes #${{ github.event.issue.number }}\n\n## Summary\n<what was wrong and how this fixes it>\n\n## Test plan\n<how the fix was verified>"
+            - If you cannot confidently fix the bug, leave a comment explaining what you found and what you think the issue is, rather than submitting a bad fix.
