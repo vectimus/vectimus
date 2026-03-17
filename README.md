@@ -1,6 +1,6 @@
 # Vectimus
 
-**Deterministic governance for AI coding agents and agentic frameworks.** Cedar policies evaluate every agent action in under 5ms. No config. No account.
+**Cedar policies for every AI agent action. Coding tools and agentic frameworks. Every evaluation under 5ms. Zero config.**
 
 [![PyPI](https://img.shields.io/pypi/v/vectimus)](https://pypi.org/project/vectimus/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -18,7 +18,7 @@ pipx install vectimus
 vectimus init
 ```
 
-That's it. Cedar policies across 11 security domains are now evaluating every tool call your agent makes. Dangerous commands, secret access, infrastructure changes and supply chain attacks are blocked before execution.
+That's it. Cedar policies evaluate every tool call — whether from a coding agent in your terminal or a framework agent in production. Dangerous commands, secret access, infrastructure changes and supply chain attacks blocked before execution.
 
 ## Why this exists
 
@@ -93,25 +93,21 @@ The entire pipeline is governed by Vectimus itself. The agents that write govern
 
 [Live threat dashboard →](https://vectimus.com/threats) | [Incident blog posts →](https://vectimus.com/blog)
 
-## Supported tools
+## Works with
 
-| Tool | Hook mechanism | Status |
-|------|---------------|--------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Command hook | Supported |
-| [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents) | Shared Claude Code hook system | Supported |
-| [Cursor](https://www.cursor.com/) | Command hook | Supported |
-| [GitHub Copilot](https://github.com/features/copilot) (VS Code) | Command hook | Supported |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Command hook | Supported |
+### Coding tools
 
-## Framework support
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [Cursor](https://www.cursor.com/) | [GitHub Copilot](https://github.com/features/copilot) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
+|:-----------:|:------:|:--------------:|:----------:|
+| ✅ | ✅ | ✅ | ✅ |
 
-The same Cedar policies that govern coding agents also govern agentic framework tool calls.
+### Agent frameworks
 
-| Framework | Integration | Install |
-|-----------|------------|---------|
-| [LangGraph / LangChain](https://github.com/langchain-ai/langgraph) | Middleware + MCP interceptor | `pip install vectimus[langgraph]` |
-| [Google ADK](https://github.com/google/adk-python) | Runner plugin + per-agent callback | `pip install vectimus[adk]` |
-| [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents) | Shared hook system | Built-in |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | [Google ADK](https://github.com/google/adk-python) | [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents) |
+|:---------:|:----------:|:----------------:|
+| ✅ | ✅ | ✅ |
+
+Same Cedar policies govern both. One install.
 
 <details>
 <summary><strong>LangGraph / LangChain integration</strong></summary>
