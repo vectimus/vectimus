@@ -7,16 +7,37 @@ from pathlib import Path
 
 from vectimus.cli.detect import DetectionReport, ToolName
 
-# Maps each tool to (config path relative to home, key containing server names).
-_TOOL_MCP_CONFIGS: dict[ToolName, tuple[str, str]] = {
-    ToolName.CLAUDE_CODE: (".claude/settings.json", "mcpServers"),
-    ToolName.CURSOR: (".cursor/mcp.json", "mcpServers"),
-    ToolName.COPILOT: (".vscode/mcp.json", "servers"),
+# Maps each tool to a list of (config path relative to home, JSON key) pairs.
+# Multiple entries per tool are checked in order; servers are merged across all.
+_TOOL_MCP_CONFIGS: dict[ToolName, list[tuple[str, str]]] = {
+    ToolName.CLAUDE_CODE: [
+        (".claude/settings.json", "mcpServers"),
+        (".claude.json", "mcpServers"),
+    ],
+    ToolName.CURSOR: [
+        (".cursor/mcp.json", "mcpServers"),
+    ],
+    ToolName.COPILOT: [
+        (".vscode/mcp.json", "servers"),
+    ],
+}
+
+# Project-level config files checked relative to cwd.
+_PROJECT_MCP_CONFIGS: dict[ToolName, list[tuple[str, str]]] = {
+    ToolName.CLAUDE_CODE: [
+        (".mcp.json", "mcpServers"),
+    ],
 }
 
 
-def discover_mcp_servers(report: DetectionReport) -> dict[ToolName, list[str]]:
+def discover_mcp_servers(
+    report: DetectionReport,
+    project_dir: Path | None = None,
+) -> dict[ToolName, list[str]]:
     """Read MCP server names from each detected tool's config.
+
+    Checks both user-level configs (relative to ``$HOME``) and
+    project-level configs (relative to *project_dir*, defaulting to cwd).
 
     Only inspects tools that were found in *report*.  Silently skips
     config files that are missing or contain invalid JSON.
@@ -25,14 +46,20 @@ def discover_mcp_servers(report: DetectionReport) -> dict[ToolName, list[str]]:
     """
     result: dict[ToolName, list[str]] = {}
     home = Path.home()
+    project = project_dir or Path.cwd()
 
-    for tool_name, (rel_path, key) in _TOOL_MCP_CONFIGS.items():
+    for tool_name, config_entries in _TOOL_MCP_CONFIGS.items():
         tool_result = report.results.get(tool_name)
         if not tool_result or not tool_result.found:
             continue
 
-        config_path = home / rel_path
-        servers = _read_server_names(config_path, key)
+        servers: set[str] = set()
+        for rel_path, key in config_entries:
+            servers.update(_read_server_names(home / rel_path, key))
+
+        for rel_path, key in _PROJECT_MCP_CONFIGS.get(tool_name, []):
+            servers.update(_read_server_names(project / rel_path, key))
+
         if servers:
             result[tool_name] = sorted(servers)
 

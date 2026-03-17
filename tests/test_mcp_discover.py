@@ -44,6 +44,79 @@ class TestDiscoverMcpServers:
         result = discover_mcp_servers(_make_report(ToolName.CLAUDE_CODE))
         assert result == {ToolName.CLAUDE_CODE: ["posthog", "slack"]}
 
+    def test_claude_code_dot_claude_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Servers in ~/.claude.json (where `claude mcp add` writes) are discovered."""
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        config = tmp_path / ".claude.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"microsoft-learn": {}, "claude-history": {}},
+                }
+            )
+        )
+
+        result = discover_mcp_servers(_make_report(ToolName.CLAUDE_CODE))
+        assert result == {ToolName.CLAUDE_CODE: ["claude-history", "microsoft-learn"]}
+
+    def test_claude_code_project_mcp_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Servers in .mcp.json (project scope) are discovered."""
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        project = tmp_path / "myproject"
+        project.mkdir()
+        config = project / ".mcp.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"sqlite": {}},
+                }
+            )
+        )
+
+        result = discover_mcp_servers(_make_report(ToolName.CLAUDE_CODE), project_dir=project)
+        assert result == {ToolName.CLAUDE_CODE: ["sqlite"]}
+
+    def test_claude_code_merges_all_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Servers from settings.json, .claude.json and .mcp.json are merged."""
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"mcpServers": {"posthog": {}}}))
+
+        dot_claude = tmp_path / ".claude.json"
+        dot_claude.write_text(json.dumps({"mcpServers": {"slack": {}}}))
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+        mcp_json = project / ".mcp.json"
+        mcp_json.write_text(json.dumps({"mcpServers": {"sqlite": {}}}))
+
+        result = discover_mcp_servers(_make_report(ToolName.CLAUDE_CODE), project_dir=project)
+        assert result == {ToolName.CLAUDE_CODE: ["posthog", "slack", "sqlite"]}
+
+    def test_claude_code_deduplicates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same server in multiple configs is not duplicated."""
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"mcpServers": {"posthog": {}}}))
+
+        dot_claude = tmp_path / ".claude.json"
+        dot_claude.write_text(json.dumps({"mcpServers": {"posthog": {}, "slack": {}}}))
+
+        result = discover_mcp_servers(_make_report(ToolName.CLAUDE_CODE))
+        assert result == {ToolName.CLAUDE_CODE: ["posthog", "slack"]}
+
     def test_cursor_servers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
         config = tmp_path / ".cursor" / "mcp.json"
