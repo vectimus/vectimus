@@ -353,6 +353,39 @@ class VectimusConfig:
             self._data["mcp"]["allowed_servers"] = allowed
             self._write()
 
+    # -- Auto-sync -----------------------------------------------------------
+
+    def is_auto_sync_enabled(self) -> bool:
+        """Check if automatic policy sync is enabled.  Default is False.
+
+        Reads from ``[updates] auto_sync`` in config.toml.  Can be overridden
+        by the ``VECTIMUS_AUTO_SYNC`` environment variable.
+        """
+        env = os.environ.get("VECTIMUS_AUTO_SYNC", "").lower()
+        if env in ("1", "true", "yes"):
+            return True
+        if env in ("0", "false", "no"):
+            return False
+        return bool(self._data.get("updates", {}).get("auto_sync", False))
+
+    def get_sync_url(self) -> str:
+        """Return the policy sync URL.  Defaults to https://api.vectimus.com."""
+        env = os.environ.get("VECTIMUS_SYNC_URL")
+        if env:
+            return env
+        return self._data.get("updates", {}).get("sync_url", "https://api.vectimus.com")
+
+    def get_sync_interval_hours(self) -> int:
+        """Return the sync check interval in hours.  Defaults to 24."""
+        env = os.environ.get("VECTIMUS_SYNC_INTERVAL")
+        if env:
+            return _safe_int(env, default=24, minimum=1)
+        return _safe_int(
+            self._data.get("updates", {}).get("sync_interval_hours", 24),
+            default=24,
+            minimum=1,
+        )
+
     # -- Server URL ----------------------------------------------------------
 
     def get_server_url(self) -> str | None:

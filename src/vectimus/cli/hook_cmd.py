@@ -151,11 +151,18 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
 
     print(json.dumps(output))
 
-    # Background policy update check (non-blocking, never breaks hook)
+    # Background policy update check (non-blocking, never breaks hook).
+    # Only runs when auto_sync is explicitly enabled in config.
     try:
+        from vectimus.engine.config import VectimusConfig as _SyncConfig
         from vectimus.engine.policy_sync import check_for_updates
 
-        check_for_updates()
+        _cfg = _SyncConfig()
+        if _cfg.is_auto_sync_enabled():
+            check_for_updates(
+                api_url=_cfg.get_sync_url(),
+                check_interval_hours=_cfg.get_sync_interval_hours(),
+            )
     except Exception:
         pass
 
@@ -312,11 +319,18 @@ def hook_cmd(source: str) -> None:
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason)
 
-    # Background policy update check (non-blocking, never breaks hook)
+    # Background policy update check (non-blocking, never breaks hook).
+    # Only runs when auto_sync is explicitly enabled in config.
     try:
+        from vectimus.engine.config import VectimusConfig as _SyncConfig
         from vectimus.engine.policy_sync import check_for_updates
 
-        check_for_updates()
+        _cfg = _SyncConfig()
+        if _cfg.is_auto_sync_enabled():
+            check_for_updates(
+                api_url=_cfg.get_sync_url(),
+                check_interval_hours=_cfg.get_sync_interval_hours(),
+            )
     except Exception:
         pass
 

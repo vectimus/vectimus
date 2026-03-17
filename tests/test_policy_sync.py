@@ -287,9 +287,21 @@ class TestCheckForUpdates:
 
     @patch("subprocess.Popen")
     def test_spawns_subprocess_when_check_needed(self, mock_popen: MagicMock) -> None:
-        # No metadata — check should be triggered.
+        # No metadata and auto_sync caller — check should be triggered.
         check_for_updates(api_url="https://fake.api")
         mock_popen.assert_called_once()
+
+    @patch("subprocess.Popen")
+    def test_auto_sync_disabled_by_default_in_config(self, mock_popen: MagicMock) -> None:
+        """Config.is_auto_sync_enabled() defaults to False — hook callers
+        should gate on this before invoking check_for_updates()."""
+        from vectimus.engine.config import VectimusConfig
+
+        with patch.object(VectimusConfig, "_load"):
+            cfg = VectimusConfig.__new__(VectimusConfig)
+            cfg._data = {}
+            cfg._path = Path("/dev/null")
+            assert cfg.is_auto_sync_enabled() is False
 
     @patch("subprocess.Popen")
     def test_skips_when_recently_checked(self, mock_popen: MagicMock) -> None:
