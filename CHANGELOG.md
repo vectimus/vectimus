@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Policy update system: policies sync from `api.vectimus.com` via `vectimus policy update` CLI or opt-in background sync
 - `vectimus policy update` CLI command for manual policy sync
 - `vectimus policy status` CLI command to show policy version and sync info
 - Policy cache at `~/.vectimus/policy-cache/` supplements bundled policies (cached packs override bundled packs with matching names)
