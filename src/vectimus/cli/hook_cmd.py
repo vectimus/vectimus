@@ -26,7 +26,7 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import DecisionVerdict
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli")
+VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "opencode")
 
 
 def _log_stderr(msg: str) -> None:
@@ -83,7 +83,7 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": reason,
             "agent_message": reason,
         }
-    if source == "gemini-cli":
+    if source in ("gemini-cli", "opencode"):
         return {
             "decision": "deny",
             "reason": reason,
@@ -120,7 +120,7 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": escalate_reason,
             "agent_message": agent_reason,
         }
-    if source == "gemini-cli":
+    if source in ("gemini-cli", "opencode"):
         return {
             "decision": "deny",
             "reason": agent_reason,
@@ -166,7 +166,7 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
     except Exception:
         pass
 
-    if source == "gemini-cli":
+    if source in ("gemini-cli", "opencode"):
         sys.exit(0)
     sys.exit(2)
 

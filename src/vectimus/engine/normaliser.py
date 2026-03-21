@@ -83,6 +83,18 @@ GEMINI_CLI_TOOL_MAP: dict[str, str] = {
     "list_directory": ActionType.FILE_READ,
 }
 
+OPENCODE_TOOL_MAP: dict[str, str] = {
+    "bash": ActionType.SHELL_COMMAND,
+    "read": ActionType.FILE_READ,
+    "write": ActionType.FILE_WRITE,
+    "edit": ActionType.FILE_WRITE,
+    "patch": ActionType.FILE_WRITE,
+    "grep": ActionType.FILE_READ,
+    "find": ActionType.FILE_READ,
+    "ls": ActionType.FILE_READ,
+    "webfetch": ActionType.WEB_REQUEST,
+}
+
 # Patterns that refine a shell_command into a more specific action type.
 _INFRA_PREFIXES = ("terraform", "kubectl", "docker", "aws", "gcloud", "az")
 _PKG_PREFIXES = ("npm", "pip", "cargo", "yarn", "pnpm", "bun")

@@ -22,6 +22,7 @@ class ToolName(StrEnum):
     CURSOR = "cursor"
     COPILOT = "copilot"
     GEMINI_CLI = "gemini-cli"
+    OPENCODE = "opencode"
 
 
 class DetectionMethod(StrEnum):
@@ -73,6 +74,7 @@ def detect_all() -> DetectionReport:
     report.results[ToolName.CURSOR] = _detect_cursor()
     report.results[ToolName.COPILOT] = _detect_vscode()
     report.results[ToolName.GEMINI_CLI] = _detect_gemini_cli()
+    report.results[ToolName.OPENCODE] = _detect_opencode()
     return report
 
 
@@ -83,6 +85,7 @@ def detect_tool(tool: ToolName) -> ToolDetectionResult:
         ToolName.CURSOR: _detect_cursor,
         ToolName.COPILOT: _detect_vscode,
         ToolName.GEMINI_CLI: _detect_gemini_cli,
+        ToolName.OPENCODE: _detect_opencode,
     }
     return detectors[tool]()
 
@@ -288,6 +291,54 @@ def _detect_gemini_cli() -> ToolDetectionResult:
         return result
 
     result.details = "Not found on PATH or via ~/.gemini/ directory."
+    return result
+
+
+# ---------------------------------------------------------------------------
+# OpenCode
+# ---------------------------------------------------------------------------
+
+
+def _detect_opencode() -> ToolDetectionResult:
+    """Detect OpenCode via PATH, project config or global config directory.
+
+    OpenCode is installed via npm (``npm i -g opencode``) or downloaded
+    directly.  It puts an ``opencode`` binary on PATH.  Project config
+    lives in ``opencode.json`` or ``.opencode/``.  Global config is at
+    ``~/.config/opencode/``.
+    """
+    result = ToolDetectionResult(tool=ToolName.OPENCODE)
+
+    which = shutil.which("opencode")
+    if which:
+        result.found = True
+        result.executable_path = which
+        result.method = DetectionMethod.PATH
+        result.details = f"Found on PATH: {which}"
+        return result
+
+    # Project-level indicators
+    if Path("opencode.json").is_file():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = "Project config found: opencode.json"
+        return result
+
+    if Path(".opencode").is_dir():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = "Project directory found: .opencode/"
+        return result
+
+    # Global config directory
+    config_dir = Path.home() / ".config" / "opencode"
+    if config_dir.is_dir():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = f"Config directory exists: {config_dir}"
+        return result
+
+    result.details = "Not found on PATH or via opencode.json / .opencode/ / ~/.config/opencode/."
     return result
 
 

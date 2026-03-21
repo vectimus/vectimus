@@ -208,11 +208,12 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
         report = detect_all()
-        assert len(report.results) == 4
+        assert len(report.results) == 5
         assert ToolName.CLAUDE_CODE in report.results
         assert ToolName.CURSOR in report.results
         assert ToolName.COPILOT in report.results
         assert ToolName.GEMINI_CLI in report.results
+        assert ToolName.OPENCODE in report.results
 
     def test_tools_found_property(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -236,7 +237,7 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
         report = detect_all()
-        assert len(report.tools_not_found) == 4
+        assert len(report.tools_not_found) == 5
 
     def test_platform_is_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(shutil, "which", lambda name: None)

@@ -60,6 +60,11 @@ def remove_cmd(force: bool) -> None:
             if path.exists() and _has_vectimus_hooks_gemini(path):
                 removals.append(("Gemini CLI", path))
 
+        elif tool_name == ToolName.OPENCODE:
+            path = Path(".opencode") / "plugins" / "vectimus.ts"
+            if path.exists():
+                removals.append(("OpenCode", path))
+
     if not removals:
         click.echo("No Vectimus hooks found in this project.")
         return
@@ -76,6 +81,7 @@ def remove_cmd(force: bool) -> None:
         "Cursor": _remove_cursor,
         "VS Code / Copilot": _remove_copilot,
         "Gemini CLI": _remove_gemini_cli,
+        "OpenCode": _remove_opencode,
     }
 
     for display_name, path in removals:
@@ -264,3 +270,13 @@ def _remove_gemini_cli(settings_path: Path) -> None:
         settings_path.unlink()
     else:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def _remove_opencode(plugin_path: Path) -> None:
+    """Remove Vectimus plugin from .opencode/plugins/."""
+    plugin_path.unlink(missing_ok=True)
+
+    # Clean up empty plugins directory.
+    parent = plugin_path.parent
+    if parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
