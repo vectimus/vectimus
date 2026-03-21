@@ -1,11 +1,11 @@
 """Persistent evaluation daemon.
 
 Keeps the PolicyEngine warm in memory and accepts evaluation requests
-over a Unix domain socket.  Eliminates the ~200ms Python startup cost
-on every hook invocation.
+over TCP localhost with auth token.  Eliminates the ~200ms Python
+startup cost on every hook invocation.
 
 Protocol: one JSON line per connection (request), one JSON line back
-(response), then close.
+(response), then close.  Every request must include the auth token.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import signal
 import sys
 import time
@@ -21,6 +22,12 @@ from pathlib import Path
 import structlog
 
 from vectimus.engine.audit import write_audit
+from vectimus.engine.daemon_info import (
+    is_daemon_alive,
+    read_daemon_info,
+    remove_daemon_info,
+    write_daemon_info,
+)
 from vectimus.engine.evaluator import PolicyEngine
 from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import DecisionVerdict
@@ -28,8 +35,6 @@ from vectimus.engine.normaliser import normalise
 
 logger = structlog.get_logger(__name__)
 
-SOCKET_PATH = Path(f"/tmp/vectimus-{os.getuid()}.sock")
-PID_PATH = Path(f"/tmp/vectimus-{os.getuid()}.pid")
 DEFAULT_IDLE_TIMEOUT = 1800  # 30 minutes
 ENGINE_CACHE_TTL = 300  # 5 minutes
 
@@ -46,7 +51,7 @@ class _CachedEngine:
 
 
 class DaemonServer:
-    """Asyncio Unix socket server for persistent policy evaluation."""
+    """Asyncio TCP server for persistent policy evaluation."""
 
     def __init__(self, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> None:
         self._engines: dict[tuple[str, bool], _CachedEngine] = {}
@@ -55,42 +60,49 @@ class DaemonServer:
         self._server: asyncio.Server | None = None
         self._shutdown_event = asyncio.Event()
         self._cleaned_projects: set[Path] = set()
+        self._token: str = ""
 
     async def start(self) -> None:
         """Start the daemon server."""
-        # Clean up stale socket
-        if SOCKET_PATH.exists():
-            if PID_PATH.exists():
-                try:
-                    pid = int(PID_PATH.read_text().strip())
-                    os.kill(pid, 0)
-                    # Process is alive — another daemon is running
-                    print(
-                        f"vectimus: daemon already running (pid {pid})",
-                        file=sys.stderr,
-                    )
-                    sys.exit(1)
-                except (ProcessLookupError, ValueError, OSError):
-                    pass  # stale
-            SOCKET_PATH.unlink(missing_ok=True)
+        # Check for existing daemon
+        info = read_daemon_info()
+        if info and is_daemon_alive(info):
+            print(
+                f"vectimus: daemon already running (pid {info['pid']})",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-        # Write PID file
-        PID_PATH.write_text(str(os.getpid()))
+        # Clean up stale info
+        remove_daemon_info()
 
-        # Start server
-        self._server = await asyncio.start_unix_server(
+        # Generate auth token
+        self._token = secrets.token_hex(32)
+
+        # Start TCP server on localhost with OS-assigned port
+        self._server = await asyncio.start_server(
             self._handle_connection,
-            path=str(SOCKET_PATH),
+            host="127.0.0.1",
+            port=0,
         )
-        # Make socket accessible only to the owner
-        SOCKET_PATH.chmod(0o600)
 
-        logger.info("daemon_started", socket=str(SOCKET_PATH), pid=os.getpid())
+        # Read the assigned port
+        port = self._server.sockets[0].getsockname()[1]
+
+        # Write daemon info
+        write_daemon_info(os.getpid(), port, self._token)
+
+        logger.info("daemon_started", port=port, pid=os.getpid())
 
         # Install signal handlers
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: self._shutdown_event.set())
+        if sys.platform != "win32":
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda: self._shutdown_event.set())
+        else:
+            # Windows: signal handlers via signal module (less reliable but functional)
+            signal.signal(signal.SIGTERM, lambda *_: self._shutdown_event.set())
+            signal.signal(signal.SIGINT, lambda *_: self._shutdown_event.set())
 
         # Run until shutdown
         idle_task = asyncio.create_task(self._idle_watchdog())
@@ -113,6 +125,22 @@ class DaemonServer:
                 return
 
             request = json.loads(line.decode())
+
+            # Verify auth token
+            if request.get("token") != self._token:
+                error_resp = {
+                    "decision": "deny",
+                    "reason": "Invalid daemon auth token",
+                    "matched_policy_ids": [],
+                    "receipt_id": None,
+                    "evaluation_time_ms": 0,
+                }
+                writer.write(json.dumps(error_resp).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
             response = await asyncio.to_thread(self._evaluate, request)
 
             # Schedule receipt cleanup on first request per project
@@ -363,11 +391,10 @@ class DaemonServer:
                 return
 
     async def shutdown(self) -> None:
-        """Clean shutdown: close server, remove socket and PID file."""
+        """Clean shutdown: close server, remove daemon info."""
         if self._server:
             self._server.close()
             await self._server.wait_closed()
 
-        SOCKET_PATH.unlink(missing_ok=True)
-        PID_PATH.unlink(missing_ok=True)
+        remove_daemon_info()
         logger.info("daemon_stopped")

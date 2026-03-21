@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
 import sys
-from pathlib import Path
 
 import click
 
-PID_PATH = Path(f"/tmp/vectimus-{os.getuid()}.pid")
-SOCKET_PATH = Path(f"/tmp/vectimus-{os.getuid()}.sock")
+from vectimus.engine.daemon_info import (
+    is_daemon_alive,
+    read_daemon_info,
+    remove_daemon_info,
+)
 
 
 @click.group("daemon")
@@ -39,29 +42,51 @@ def daemon_start(foreground: bool, idle_timeout: int) -> None:
     from vectimus.engine.daemon import DaemonServer
 
     if not foreground:
-        # Double-fork to detach from the parent process
-        try:
-            pid = os.fork()
-            if pid > 0:
-                sys.exit(0)
-        except OSError:
-            # Fork not available (shouldn't happen on macOS/Linux)
-            pass
+        if sys.platform == "win32":
+            # Windows: spawn a detached child process running in foreground mode
+            kwargs: dict = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "creationflags": (
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                ),
+            }
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "vectimus",
+                    "daemon",
+                    "start",
+                    "--foreground",
+                    f"--idle-timeout={idle_timeout}",
+                ],
+                **kwargs,
+            )
+            return
         else:
-            os.setsid()
+            # Unix: double-fork to detach from the parent process
             try:
                 pid = os.fork()
                 if pid > 0:
                     sys.exit(0)
             except OSError:
                 pass
+            else:
+                os.setsid()
+                try:
+                    pid = os.fork()
+                    if pid > 0:
+                        sys.exit(0)
+                except OSError:
+                    pass
 
-            # Redirect stdio to /dev/null
-            devnull = os.open(os.devnull, os.O_RDWR)
-            os.dup2(devnull, 0)
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            os.close(devnull)
+                # Redirect stdio to /dev/null
+                devnull = os.open(os.devnull, os.O_RDWR)
+                os.dup2(devnull, 0)
+                os.dup2(devnull, 1)
+                os.dup2(devnull, 2)
+                os.close(devnull)
 
     server = DaemonServer(idle_timeout=idle_timeout)
     asyncio.run(server.start())
@@ -70,39 +95,36 @@ def daemon_start(foreground: bool, idle_timeout: int) -> None:
 @daemon_cmd.command("stop")
 def daemon_stop() -> None:
     """Stop the running daemon."""
-    if not PID_PATH.exists():
+    info = read_daemon_info()
+    if info is None:
         click.echo("Daemon is not running.")
         return
 
+    if not is_daemon_alive(info):
+        click.echo("Daemon is not running (stale info file).")
+        remove_daemon_info()
+        return
+
     try:
-        pid = int(PID_PATH.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
-        click.echo(f"Sent SIGTERM to daemon (pid {pid}).")
+        os.kill(info["pid"], signal.SIGTERM)
+        click.echo(f"Sent SIGTERM to daemon (pid {info['pid']}).")
     except ProcessLookupError:
-        click.echo("Daemon is not running (stale PID file).")
-        PID_PATH.unlink(missing_ok=True)
-        SOCKET_PATH.unlink(missing_ok=True)
-    except ValueError:
-        click.echo("Invalid PID file.")
-        PID_PATH.unlink(missing_ok=True)
+        click.echo("Daemon is not running (stale info file).")
+        remove_daemon_info()
 
 
 @daemon_cmd.command("status")
 def daemon_status() -> None:
     """Show daemon status."""
-    if not PID_PATH.exists():
+    info = read_daemon_info()
+    if info is None:
         click.echo("Daemon: not running")
         return
 
-    try:
-        pid = int(PID_PATH.read_text().strip())
-        os.kill(pid, 0)
-        socket_ok = SOCKET_PATH.exists()
-        click.echo(f"Daemon: running (pid {pid})")
-        click.echo(f"Socket: {'ready' if socket_ok else 'not found'} ({SOCKET_PATH})")
-    except ProcessLookupError:
-        click.echo("Daemon: not running (stale PID file)")
-        PID_PATH.unlink(missing_ok=True)
-        SOCKET_PATH.unlink(missing_ok=True)
-    except ValueError:
-        click.echo("Daemon: invalid PID file")
+    if not is_daemon_alive(info):
+        click.echo("Daemon: not running (stale info file)")
+        remove_daemon_info()
+        return
+
+    click.echo(f"Daemon: running (pid {info['pid']})")
+    click.echo(f"Port:   {info['port']}")

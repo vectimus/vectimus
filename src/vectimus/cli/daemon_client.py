@@ -1,8 +1,9 @@
-"""Thin Unix socket client for the Vectimus evaluation daemon.
+"""Thin TCP client for the Vectimus evaluation daemon.
 
-Connects to the persistent daemon, sends an evaluation request and
-returns the decision.  Falls back to ``None`` if the daemon is
-unavailable so the caller can use inline evaluation instead.
+Connects to the persistent daemon over TCP localhost, sends an
+evaluation request with auth token and returns the decision.  Falls
+back to ``None`` if the daemon is unavailable so the caller can use
+inline evaluation instead.
 """
 
 from __future__ import annotations
@@ -13,12 +14,10 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-SOCKET_PATH = Path(f"/tmp/vectimus-{os.getuid()}.sock")
-PID_PATH = Path(f"/tmp/vectimus-{os.getuid()}.pid")
+from vectimus.engine.daemon_info import is_daemon_alive, read_daemon_info
 
-# Timeout for the entire socket round-trip (connect + send + recv).
+# Timeout for the entire TCP round-trip (connect + send + recv).
 _SOCKET_TIMEOUT = 2.0
 
 # How long to wait for the daemon to start on cold boot.
@@ -36,21 +35,35 @@ def daemon_evaluate(source: str, payload: dict, cwd: str) -> dict | None:
     if os.environ.get("VECTIMUS_NO_DAEMON", "").lower() in ("1", "true", "yes"):
         return None
 
-    if not SOCKET_PATH.exists():
+    info = read_daemon_info()
+    if info is None or not is_daemon_alive(info):
         if not _try_auto_start():
             return None
+        info = read_daemon_info()
+        if info is None:
+            return None
 
-    return _send_request(source, payload, cwd)
+    return _send_request(source, payload, cwd, info)
 
 
-def _send_request(source: str, payload: dict, cwd: str) -> dict | None:
-    """Connect to the daemon socket, send request, return response."""
+def _send_request(source: str, payload: dict, cwd: str, info: dict) -> dict | None:
+    """Connect to the daemon TCP server, send request, return response."""
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(_SOCKET_TIMEOUT)
-        sock.connect(str(SOCKET_PATH))
+        sock.connect(("127.0.0.1", info["port"]))
 
-        request = json.dumps({"source": source, "payload": payload, "cwd": cwd}) + "\n"
+        request = (
+            json.dumps(
+                {
+                    "token": info["token"],
+                    "source": source,
+                    "payload": payload,
+                    "cwd": cwd,
+                }
+            )
+            + "\n"
+        )
         sock.sendall(request.encode())
 
         # Read until newline
@@ -72,36 +85,40 @@ def _send_request(source: str, payload: dict, cwd: str) -> dict | None:
 
 
 def _try_auto_start() -> bool:
-    """Spawn the daemon in the background.  Returns True if socket appears."""
-    # Check for a running daemon with a stale socket
-    if PID_PATH.exists():
-        try:
-            pid = int(PID_PATH.read_text().strip())
-            os.kill(pid, 0)
-            # Process is alive but socket missing — wait briefly
-            return _wait_for_socket()
-        except (ProcessLookupError, ValueError, OSError):
-            # Stale PID file — clean up
-            PID_PATH.unlink(missing_ok=True)
+    """Spawn the daemon in the background.  Returns True if daemon info appears."""
+    # Check for a running daemon with stale info
+    info = read_daemon_info()
+    if info and is_daemon_alive(info):
+        return True
 
     try:
+        kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        else:
+            kwargs["start_new_session"] = True
+
         subprocess.Popen(
             [sys.executable, "-m", "vectimus", "daemon", "start"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **kwargs,
         )
     except Exception:
         return False
 
-    return _wait_for_socket()
+    return _wait_for_daemon()
 
 
-def _wait_for_socket() -> bool:
-    """Poll for the socket file to appear."""
+def _wait_for_daemon() -> bool:
+    """Poll for the daemon info file to appear with a live process."""
     deadline = time.monotonic() + _STARTUP_WAIT
     while time.monotonic() < deadline:
-        if SOCKET_PATH.exists():
+        info = read_daemon_info()
+        if info and is_daemon_alive(info):
             return True
         time.sleep(_STARTUP_POLL_INTERVAL)
     return False
