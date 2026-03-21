@@ -4,8 +4,8 @@ Reads tool call JSON from stdin, evaluates against Cedar policies,
 returns a tool-specific deny payload via stdout.
 
 Exit codes:
-  0 = allow (no output)
-  2 = deny  (JSON on stdout)
+  0 = allow (no output) or deny (JSON with permissionDecision on stdout)
+  2 = deny  (Cursor only)
 
 Supports VECTIMUS_SERVER_URL for server-mode evaluation with local fallback,
 and VECTIMUS_DEBUG for diagnostic logging to stderr.
@@ -88,14 +88,18 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "decision": "deny",
             "reason": reason,
         }
-    # claude-code, claude-agent-sdk and copilot use the same format
+    # claude-code and claude-agent-sdk need hookSpecificOutput wrapper
     _claude_sources = ("claude-code", "claude-agent-sdk")
     event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
-    return {
+    inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }
+    if source in _claude_sources:
+        return {"hookSpecificOutput": inner}
+    # copilot uses the flat format
+    return inner
 
 
 def _escalate_output(source: str, payload: dict, reason: str) -> dict:
@@ -127,22 +131,22 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
         }
     _claude_sources = ("claude-code", "claude-agent-sdk")
     event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
-    return {
+    inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": agent_reason,
     }
+    if source in _claude_sources:
+        return {"hookSpecificOutput": inner}
+    return inner
 
 
 def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = False) -> None:
     """Emit the deny output and exit.
 
-    For Gemini CLI, deny JSON is written to stdout and exit 0 is used.
-    Gemini CLI treats non-zero exit codes as hook failures (crashes), not
-    deliberate denials.  The deny decision is communicated via the JSON
-    ``decision`` field so the agent sees the reason.
-
-    For all other sources, deny JSON is written to stdout with exit 2.
+    Claude Code and Gemini CLI require exit 0 with structured JSON — non-zero
+    exit codes are treated as hook crashes, not deliberate denials.  Cursor
+    uses exit 2 for denials.
     """
     if escalate:
         output = _escalate_output(source, payload, reason)
@@ -166,9 +170,9 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
     except Exception:
         pass
 
-    if source == "gemini-cli":
-        sys.exit(0)
-    sys.exit(2)
+    if source == "cursor":
+        sys.exit(2)
+    sys.exit(0)
 
 
 def _project_path_from_payload(source: str, payload: dict) -> Path:
@@ -212,7 +216,7 @@ def hook_cmd(source: str) -> None:
     """Evaluate an AI tool action against Cedar policies.
 
     Reads JSON from stdin, evaluates against loaded policies and returns
-    allow (exit 0) or deny (exit 2 with JSON on stdout).
+    allow (exit 0, no output) or deny (exit 0 with deny JSON on stdout).
 
     \b
       echo '{"tool_name":"Bash",...}' | vectimus hook --source claude-code
