@@ -118,3 +118,4 @@ class AuditRecord(BaseModel):
     event: VectimusEvent
     decision: Decision
     recorded_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    receipt_id: str | None = None

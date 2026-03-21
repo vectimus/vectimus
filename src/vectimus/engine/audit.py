@@ -18,6 +18,7 @@ def write_audit(
     decision: Decision,
     log_dir: str | None = None,
     max_file_size_mb: int | None = None,
+    receipt_id: str | None = None,
 ) -> None:
     """Write an audit record to the local JSONL log.
 
@@ -27,7 +28,7 @@ def write_audit(
         from vectimus.engine.models import AuditRecord as _AuditRecord
         from vectimus.exporters.jsonl import JsonlExporter
 
-        record = _AuditRecord(event=event, decision=decision)
+        record = _AuditRecord(event=event, decision=decision, receipt_id=receipt_id)
         JsonlExporter(
             log_dir=log_dir,
             max_file_size_mb=max_file_size_mb,

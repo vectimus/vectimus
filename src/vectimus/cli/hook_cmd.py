@@ -23,7 +23,7 @@ import click
 from vectimus.engine.audit import write_audit
 from vectimus.engine.evaluator import PolicyEngine
 from vectimus.engine.loader import PolicyLoader
-from vectimus.engine.models import DecisionVerdict
+from vectimus.engine.models import Decision, DecisionVerdict, VectimusEvent
 from vectimus.engine.normaliser import normalise
 
 VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli")
@@ -269,8 +269,39 @@ def hook_cmd(source: str) -> None:
                 sys.exit(0)
             sys.exit(0)
 
-    # Local evaluation
+    # Try daemon first (eliminates ~200ms Python startup on repeat calls).
+    from vectimus.cli.daemon_client import daemon_evaluate
+
+    daemon_result = daemon_evaluate(source, payload, str(project_path))
+    if daemon_result is not None:
+        if debug:
+            _log_stderr(f"daemon decision={daemon_result.get('decision')}")
+
+        verdict = daemon_result.get("decision", "allow")
+        receipt_id = daemon_result.get("receipt_id")
+
+        if verdict == DecisionVerdict.ESCALATE:
+            reason = daemon_result.get("reason") or "Flagged by Vectimus"
+            if receipt_id:
+                reason += f" (receipt: {receipt_id[:13]})"
+            matched = daemon_result.get("matched_policy_ids", [])
+            _log_stderr_overrides(matched)
+            _emit_deny(source, payload, reason, escalate=True)
+
+        if verdict == DecisionVerdict.DENY:
+            reason = daemon_result.get("reason") or "Denied by Vectimus"
+            if receipt_id:
+                reason += f" (receipt: {receipt_id[:13]})"
+            matched = daemon_result.get("matched_policy_ids", [])
+            _log_stderr_overrides(matched)
+            _emit_deny(source, payload, reason)
+
+        # ALLOW — exit cleanly
+        sys.exit(0)
+
+    # Inline fallback (daemon unavailable)
     if debug:
+        _log_stderr("daemon unavailable, using inline evaluation")
         if source == "cursor":
             cmd = payload.get("command") or (payload.get("tool_input") or {}).get("command")
             _log_stderr(f"hook={payload.get('hook_event_name')} command={cmd}")
@@ -305,23 +336,55 @@ def hook_cmd(source: str) -> None:
         observe = loader.config.is_observe_mode()
     engine = PolicyEngine(loader=loader, observe=observe)
     decision = engine.evaluate(event)
+
+    # Generate receipt_id synchronously (cheap UUID4) so it can be included
+    # in DENY messages.  Full receipt construction + signing happens async.
+    receipt_id: str | None = None
+    try:
+        from vectimus.engine.receipts import generate_receipt_id
+
+        if loader.config.is_receipts_enabled(project_path):
+            receipt_id = generate_receipt_id()
+    except Exception:
+        pass
+
     write_audit(
         event,
         decision,
         log_dir=loader.config.get_audit_log_dir(project_path),
         max_file_size_mb=loader.config.get_audit_max_file_size_mb(project_path),
+        receipt_id=receipt_id,
     )
+
+    # Kick off async receipt generation (never blocks the hook response).
+    if receipt_id:
+        try:
+            _generate_receipt_async(
+                receipt_id=receipt_id,
+                event=event,
+                decision=decision,
+                engine=engine,
+                loader=loader,
+                project_path=project_path,
+                observe=observe,
+            )
+        except Exception as exc:
+            _log_stderr(f"receipt generation failed: {exc}")
 
     if debug:
         _log_stderr(f"decision={decision.decision} policies={decision.matched_policy_ids}")
 
     if decision.decision == DecisionVerdict.ESCALATE:
         reason = decision.reason or "Flagged by Vectimus"
+        if receipt_id:
+            reason += f" (receipt: {receipt_id[:13]})"
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason, escalate=True)
 
     if decision.decision == DecisionVerdict.DENY:
         reason = decision.reason or "Denied by Vectimus"
+        if receipt_id:
+            reason += f" (receipt: {receipt_id[:13]})"
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason)
 
@@ -341,3 +404,98 @@ def hook_cmd(source: str) -> None:
         pass
 
     sys.exit(0)
+
+
+def _generate_receipt_async(
+    *,
+    receipt_id: str,
+    event: VectimusEvent,
+    decision: Decision,
+    engine: PolicyEngine,
+    loader: PolicyLoader,
+    project_path: Path,
+    observe: bool,
+) -> None:
+    """Build, sign and write a governance receipt in a background thread."""
+    from vectimus.engine.keys import load_signing_key
+    from vectimus.engine.receipts import (
+        build_receipt,
+        compute_context_hash,
+        compute_policy_set_hash,
+        sign_receipt,
+        write_receipt_async,
+    )
+
+    # Determine outcome string
+    if observe and decision.decision in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
+        outcome = "OBSERVE"
+    elif decision.decision == DecisionVerdict.DENY:
+        outcome = "DENY"
+    elif decision.decision == DecisionVerdict.ESCALATE:
+        outcome = "DENY"  # Escalate is deny for receipt purposes
+    else:
+        outcome = "ALLOW"
+
+    # Build command summary
+    command_summary = event.action.command or event.action.file_path or event.action.url or ""
+
+    # Build action context for hashing
+    action_context: dict = {
+        "action_type": event.action.action_type,
+        "raw_tool_name": event.action.raw_tool_name,
+    }
+    if event.action.command:
+        action_context["command"] = event.action.command
+    if event.action.file_path:
+        action_context["file_path"] = event.action.file_path
+    if event.action.url:
+        action_context["url"] = event.action.url
+
+    context_hash = compute_context_hash(action_context)
+
+    # Policy set hash
+    policy_set_hash = compute_policy_set_hash(engine._policies_text)
+
+    # Get pack version
+    pack_version = "0.0.0"
+    try:
+        packs = loader.discover_packs()
+        if packs:
+            pack_version = packs[0].version
+    except Exception:
+        pass
+
+    # Matched policy ID
+    matched_policy_id = decision.matched_policy_ids[0] if decision.matched_policy_ids else None
+
+    # Principal info
+    principal_type = "agent" if event.identity.identity_type == "agent" else "developer"
+    principal_id = event.identity.principal
+
+    receipt = build_receipt(
+        receipt_id=receipt_id,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        tool=event.action.raw_tool_name,
+        normalised_tool=event.action.action_type,
+        command_summary=command_summary,
+        context_hash=context_hash,
+        policy_set_hash=policy_set_hash,
+        policy_pack_version=pack_version,
+        matched_policy_id=matched_policy_id,
+        outcome=outcome,
+        reason=decision.reason or "All checks passed",
+        evaluation_time_ms=decision.evaluation_time_ms,
+    )
+
+    # Sign the receipt
+    try:
+        key_id, signing_key = load_signing_key()
+        receipt = sign_receipt(receipt, signing_key, key_id)
+    except FileNotFoundError:
+        # No signing key available -- write unsigned receipt
+        pass
+
+    # Write async
+    receipts_dir = project_path / ".vectimus" / "receipts"
+    write_receipt_async(receipt, receipts_dir)
