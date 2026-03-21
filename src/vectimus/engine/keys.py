@@ -169,8 +169,9 @@ def _write_restricted(path: Path, content: str) -> None:
     """Write content to a file with 0600 permissions."""
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
+        f = os.fdopen(fd, "w")
     except BaseException:
         os.close(fd)
         raise
+    with f:
+        f.write(content)
