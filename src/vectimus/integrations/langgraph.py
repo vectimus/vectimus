@@ -118,14 +118,15 @@ def _infer_action_type(tool_name: str, tool_args: dict[str, Any]) -> str:
         base = ActionType.SHELL_COMMAND
 
     # Refine shell commands using the same heuristics as the normaliser.
+    shell_file_path: str | None = None
     if base == ActionType.SHELL_COMMAND:
         command = tool_args.get("command") or tool_args.get("cmd") or ""
         if command:
             from vectimus.engine.normaliser import _refine_shell_action
 
-            base = _refine_shell_action(command)
+            base, shell_file_path = _refine_shell_action(command)
 
-    return base
+    return base, shell_file_path
 
 
 def _extract_mcp_parts(tool_name: str) -> tuple[str | None, str | None]:
@@ -144,7 +145,7 @@ def _build_event(
     cwd: str | None = None,
 ) -> VectimusEvent:
     """Build a VectimusEvent from a LangChain/LangGraph tool call."""
-    action_type = _infer_action_type(tool_name, tool_args)
+    action_type, shell_file_path = _infer_action_type(tool_name, tool_args)
     mcp_server, mcp_tool = _extract_mcp_parts(tool_name)
 
     # Extract common fields from args
@@ -154,7 +155,12 @@ def _build_event(
         or tool_args.get("query")
         or tool_args.get("input")
     )
-    file_path = tool_args.get("file_path") or tool_args.get("path") or tool_args.get("filename")
+    file_path = (
+        tool_args.get("file_path")
+        or tool_args.get("path")
+        or tool_args.get("filename")
+        or shell_file_path
+    )
     url = tool_args.get("url") or tool_args.get("uri")
     file_content = tool_args.get("content") or tool_args.get("text")
 

@@ -54,9 +54,10 @@ def _normalise_claude_code(payload: dict[str, Any]) -> VectimusEvent:
     elif action_type == ActionType.AGENT_MESSAGE:
         command = _build_agent_message_command(tool_input)
 
-    # Refine shell commands
+    # Refine shell commands — may reclassify to file_read/file_write.
+    shell_file_path: str | None = None
     if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
+        action_type, shell_file_path = _refine_shell_action(command)
 
     # MCP fields
     mcp_server: str | None = None
@@ -93,7 +94,7 @@ def _normalise_claude_code(payload: dict[str, Any]) -> VectimusEvent:
             action_type=action_type,
             raw_tool_name=tool_name,
             command=command,
-            file_path=_extract_file_path(tool_input),
+            file_path=_extract_file_path(tool_input) or shell_file_path,
             url=_extract_url(tool_input),
             mcp_server=mcp_server,
             mcp_tool=mcp_tool,

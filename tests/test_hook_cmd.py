@@ -63,7 +63,7 @@ class TestInvalidJson:
 
     def test_invalid_json_claude_code(self) -> None:
         exit_code, output = _run_hook("claude-code", "not json")
-        assert exit_code == 2
+        assert exit_code == 0
         # Output contains deny JSON (may also contain structlog lines)
         assert '"permissionDecision": "deny"' in output
 
@@ -74,7 +74,7 @@ class TestInvalidJson:
 
     def test_invalid_json_copilot(self) -> None:
         exit_code, output = _run_hook("copilot", "<<<")
-        assert exit_code == 2
+        assert exit_code == 0
         assert '"permissionDecision": "deny"' in output
 
 
@@ -105,11 +105,13 @@ class TestDenyOutputFormat:
             "cwd": str(tmp_path),
         }
         exit_code, output = _run_hook("claude-code", payload)
-        assert exit_code == 2
+        assert exit_code == 0
         result = self._extract_json(output)
-        assert result["permissionDecision"] == "deny"
-        assert "hookEventName" in result
-        assert "permissionDecisionReason" in result
+        assert "hookSpecificOutput" in result
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny"
+        assert "hookEventName" in inner
+        assert "permissionDecisionReason" in inner
 
     def test_cursor_deny_format(self, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -134,7 +136,7 @@ class TestDenyOutputFormat:
             "cwd": str(tmp_path),
         }
         exit_code, output = _run_hook("copilot", payload)
-        assert exit_code == 2
+        assert exit_code == 0
         result = self._extract_json(output)
         assert result["permissionDecision"] == "deny"
         assert "hookEventName" in result
@@ -172,12 +174,14 @@ class TestAllowBehaviour:
 
 
 class TestEscalateFailsClosed:
-    """ESCALATE must produce exit code 2 with deny (local mode).
+    """ESCALATE must fall back to deny locally.
 
     Local hooks cannot reliably prompt the user for approval due to
     limitations in Claude Code and Cursor.  Escalate falls back to deny
     with a descriptive message.  Server mode can implement real approval
     workflows (PagerDuty, Slack, etc.).
+
+    Exit codes: 0 for claude-code/copilot, 2 for cursor.
     """
 
     def test_escalate_denied_local_claude_code(self, tmp_path, monkeypatch) -> None:
@@ -201,10 +205,12 @@ class TestEscalateFailsClosed:
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("claude-code", payload)
 
-        assert exit_code == 2, "ESCALATE must produce exit code 2 (deny)"
+        assert exit_code == 0, "ESCALATE must produce exit code 0 for claude-code"
         result = self._extract_json(output)
-        assert result["permissionDecision"] == "deny"
-        assert "[escalate]" in result["permissionDecisionReason"]
+        assert "hookSpecificOutput" in result
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny"
+        assert "[escalate]" in inner["permissionDecisionReason"]
 
     def test_escalate_denied_local_cursor(self, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -252,7 +258,7 @@ class TestEscalateFailsClosed:
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("copilot", payload)
 
-        assert exit_code == 2, "ESCALATE must produce exit code 2"
+        assert exit_code == 0, "ESCALATE must produce exit code 0 for copilot"
         result = self._extract_json(output)
         assert result["permissionDecision"] == "deny"
         assert "[escalate]" in result["permissionDecisionReason"]
@@ -283,7 +289,7 @@ class TestEscalateFailsClosed:
         ):
             exit_code, output = _run_hook("claude-code", payload)
 
-        assert exit_code == 2, "ESCALATE from server must produce exit code 2"
+        assert exit_code == 0, "ESCALATE from server must produce exit code 0 for claude-code"
         assert "escalate" in output.lower()
 
     def test_server_mode_cursor_gets_cursor_format(self, tmp_path, monkeypatch) -> None:
@@ -361,7 +367,7 @@ class TestEscalateFailsClosed:
         ):
             exit_code, output = _run_hook("claude-code", payload)
 
-        assert exit_code == 2
+        assert exit_code == 0
         result = self._extract_json(output)
         # Claude Code should use the server's hookSpecificOutput directly
         assert result["permissionDecision"] == "deny"

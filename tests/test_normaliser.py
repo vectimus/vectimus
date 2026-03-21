@@ -599,6 +599,262 @@ class TestEnrichmentIntegration:
         assert event.context.hostname == expected
 
 
+class TestShellFileOperationDetection:
+    """Tests for shell command reclassification as file_read / file_write.
+
+    These test the security fix that prevents agents from bypassing file
+    policies by using Bash instead of Read/Write tools.
+    """
+
+    def _bash_payload(self, command: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "hook_event_name": "PreToolUse",
+        }
+
+    # -- File reads via shell commands --
+
+    def test_cat_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("cat .env"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".env"
+
+    def test_cat_with_flags(self) -> None:
+        event = normalise(self._bash_payload("cat -n /etc/passwd"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/etc/passwd"
+
+    def test_less_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("less ~/.ssh/id_rsa"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "~/.ssh/id_rsa"
+
+    def test_head_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("head -n 5 .aws/credentials"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".aws/credentials"
+
+    def test_tail_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("tail -f /var/log/syslog"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/var/log/syslog"
+
+    def test_more_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("more credentials.json"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "credentials.json"
+
+    def test_strings_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("strings /tmp/binary"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/tmp/binary"
+
+    def test_grep_with_file_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("grep API_KEY .env"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".env"
+
+    def test_grep_with_flags(self) -> None:
+        event = normalise(self._bash_payload("grep -r password .aws/credentials"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".aws/credentials"
+
+    def test_grep_piped_no_file_stays_shell(self) -> None:
+        """grep reading from stdin (piped) should not be reclassified."""
+        event = normalise(self._bash_payload("echo hello | grep hello"), "claude-code")
+        assert event.action.action_type == ActionType.SHELL_COMMAND
+
+    def test_sudo_cat_detected(self) -> None:
+        event = normalise(self._bash_payload("sudo cat /etc/shadow"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/etc/shadow"
+
+    # -- File writes via output redirect --
+
+    def test_redirect_detected_as_file_write(self) -> None:
+        event = normalise(self._bash_payload("echo malicious > .env"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".env"
+
+    def test_append_redirect_detected(self) -> None:
+        event = normalise(
+            self._bash_payload("cat payload >> .github/workflows/main.yml"), "claude-code"
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".github/workflows/main.yml"
+
+    def test_redirect_with_quoted_path(self) -> None:
+        event = normalise(self._bash_payload('echo x > ".claude/settings.json"'), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".claude/settings.json"
+
+    # -- File writes via tee --
+
+    def test_tee_detected_as_file_write(self) -> None:
+        event = normalise(self._bash_payload("cat data | tee .vectimus/config.toml"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".vectimus/config.toml"
+
+    def test_tee_append_detected(self) -> None:
+        event = normalise(self._bash_payload("echo line | tee -a CLAUDE.md"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == "CLAUDE.md"
+
+    # -- File writes via dd --
+
+    def test_dd_of_detected_as_file_write(self) -> None:
+        event = normalise(
+            self._bash_payload("dd if=/dev/zero of=/etc/hosts bs=1k count=1"), "claude-code"
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == "/etc/hosts"
+
+    # -- File writes via python -c open().write() --
+
+    def test_python_open_write_detected(self) -> None:
+        cmd = """python3 -c "open('.env','w').write('SECRET=pwned')" """
+        event = normalise(self._bash_payload(cmd), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".env"
+
+    def test_python_open_write_single_quotes(self) -> None:
+        cmd = """python -c "open('.claude/settings.json').write('{}')\" """
+        event = normalise(self._bash_payload(cmd), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".claude/settings.json"
+
+    # -- File writes via sed -i --
+
+    def test_sed_inplace_detected(self) -> None:
+        event = normalise(self._bash_payload("sed -i 's/old/new/' config.yaml"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == "config.yaml"
+
+    # -- File writes via cp/mv --
+
+    def test_cp_detected_as_file_write(self) -> None:
+        event = normalise(
+            self._bash_payload("cp malicious.yml .github/workflows/deploy.yml"), "claude-code"
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".github/workflows/deploy.yml"
+
+    def test_mv_detected_as_file_write(self) -> None:
+        event = normalise(self._bash_payload("mv payload .cursorrules"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".cursorrules"
+
+    # -- Windows file reads --
+
+    def test_type_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("type .env"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".env"
+
+    def test_get_content_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("Get-Content .ssh\\id_rsa"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".ssh\\id_rsa"
+
+    def test_gc_alias_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("gc credentials.json"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "credentials.json"
+
+    def test_findstr_detected_as_file_read(self) -> None:
+        event = normalise(self._bash_payload("findstr PASSWORD .env"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".env"
+
+    def test_select_string_detected_as_file_read(self) -> None:
+        event = normalise(
+            self._bash_payload("Select-String -Pattern SECRET .aws\\credentials"),
+            "claude-code",
+        )
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".aws\\credentials"
+
+    # -- Windows file writes --
+
+    def test_set_content_detected_as_file_write(self) -> None:
+        event = normalise(
+            self._bash_payload('Set-Content -Path ".cursorrules" -Value "pwned"'),
+            "claude-code",
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".cursorrules"
+
+    def test_out_file_detected_as_file_write(self) -> None:
+        event = normalise(self._bash_payload('"data" | Out-File .env'), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".env"
+
+    def test_copy_detected_as_file_write(self) -> None:
+        event = normalise(
+            self._bash_payload("copy malicious.yml .github\\workflows\\deploy.yml"),
+            "claude-code",
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".github\\workflows\\deploy.yml"
+
+    def test_xcopy_detected_as_file_write(self) -> None:
+        event = normalise(
+            self._bash_payload("xcopy payload.txt C:\\Users\\target\\secrets.txt"),
+            "claude-code",
+        )
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == "C:\\Users\\target\\secrets.txt"
+
+    def test_windows_move_detected_as_file_write(self) -> None:
+        event = normalise(self._bash_payload("move payload .cursorrules"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".cursorrules"
+
+    # -- Commands that should NOT be reclassified --
+
+    def test_ls_stays_shell_command(self) -> None:
+        event = normalise(self._bash_payload("ls -la"), "claude-code")
+        assert event.action.action_type == ActionType.SHELL_COMMAND
+
+    def test_echo_without_redirect_stays_shell(self) -> None:
+        event = normalise(self._bash_payload("echo hello world"), "claude-code")
+        assert event.action.action_type == ActionType.SHELL_COMMAND
+
+    def test_mkdir_stays_shell_command(self) -> None:
+        event = normalise(self._bash_payload("mkdir -p /tmp/build"), "claude-code")
+        assert event.action.action_type == ActionType.SHELL_COMMAND
+
+    def test_infra_not_reclassified(self) -> None:
+        """Infrastructure commands should keep their existing classification."""
+        event = normalise(self._bash_payload("terraform plan > plan.txt"), "claude-code")
+        # terraform is detected first, before redirect check
+        assert event.action.action_type == ActionType.INFRASTRUCTURE
+
+    # -- Cross-adapter: verify file_path propagates in Copilot/Cursor --
+
+    def test_copilot_bash_cat_gets_file_path(self) -> None:
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat .env"},
+            "hookEventName": "PreToolUse",
+        }
+        event = normalise(payload, "copilot")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == ".env"
+
+    def test_cursor_shell_redirect_gets_file_path(self) -> None:
+        payload = {
+            "hook_event_name": "preToolUse",
+            "tool_name": "Shell",
+            "tool_input": {"command": "echo pwned > .cursorrules"},
+            "cwd": "/project",
+        }
+        event = normalise(payload, "cursor")
+        assert event.action.action_type == ActionType.FILE_WRITE
+        assert event.action.file_path == ".cursorrules"
+
+
 class TestNormaliserErrors:
     """Test error handling."""
 

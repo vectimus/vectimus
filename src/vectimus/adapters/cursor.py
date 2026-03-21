@@ -66,8 +66,11 @@ def _normalise_cursor(payload: dict[str, Any]) -> VectimusEvent:
         file_path = _extract_file_path(payload)
         raw_tool = hook_event
 
+    shell_file_path: str | None = None
     if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
+        action_type, shell_file_path = _refine_shell_action(command)
+    if not file_path and shell_file_path:
+        file_path = shell_file_path
 
     # MCP fields — extract server/tool from mcp__server__tool naming convention.
     mcp_server: str | None = None
