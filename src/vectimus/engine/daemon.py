@@ -54,6 +54,7 @@ class DaemonServer:
         self._last_activity = time.monotonic()
         self._server: asyncio.Server | None = None
         self._shutdown_event = asyncio.Event()
+        self._cleaned_projects: set[Path] = set()
 
     async def start(self) -> None:
         """Start the daemon server."""
@@ -113,6 +114,15 @@ class DaemonServer:
 
             request = json.loads(line.decode())
             response = await asyncio.to_thread(self._evaluate, request)
+
+            # Schedule receipt cleanup on first request per project
+            cwd = request.get("cwd", os.getcwd())
+            project_path = Path(cwd).resolve()
+            if project_path not in self._cleaned_projects:
+                self._cleaned_projects.add(project_path)
+                asyncio.get_event_loop().call_later(
+                    30, self._schedule_receipt_cleanup, project_path
+                )
 
             writer.write(json.dumps(response).encode() + b"\n")
             await writer.drain()
@@ -315,6 +325,32 @@ class DaemonServer:
         self._engines[key] = cached
         logger.info("engine_cached", project=str(project_path), observe=observe)
         return cached
+
+    def _schedule_receipt_cleanup(self, project_path: Path) -> None:
+        """Schedule receipt cleanup for a project in a background task."""
+        asyncio.ensure_future(self._run_receipt_cleanup(project_path))
+
+    async def _run_receipt_cleanup(self, project_path: Path) -> None:
+        """Run receipt retention cleanup in a thread to avoid blocking."""
+        try:
+            from vectimus.engine.config import VectimusConfig
+            from vectimus.engine.receipts import cleanup_old_receipts
+
+            config = VectimusConfig()
+            receipts_dir = project_path / ".vectimus" / "receipts"
+            if receipts_dir.exists():
+                retention_days = config.get_receipts_retention_days(project_path)
+                removed = await asyncio.to_thread(
+                    cleanup_old_receipts, receipts_dir, retention_days
+                )
+                if removed:
+                    logger.info(
+                        "daemon_receipt_cleanup",
+                        project=str(project_path),
+                        removed=removed,
+                    )
+        except Exception as exc:
+            logger.warning("daemon_receipt_cleanup_failed", error=str(exc))
 
     async def _idle_watchdog(self) -> None:
         """Shut down after idle_timeout seconds of inactivity."""

@@ -13,6 +13,7 @@ from vectimus.cli.hook_cmd import hook_cmd
 from vectimus.cli.init_cmd import init_cmd
 from vectimus.cli.pack_cmd import pack_cmd
 from vectimus.cli.policy_cmd import policy_cmd
+from vectimus.cli.receipts_cmd import receipts_cmd
 from vectimus.cli.remove_cmd import remove_cmd
 from vectimus.cli.rule_cmd import rule_cmd
 from vectimus.cli.server_cmd import server_cmd
@@ -128,5 +129,6 @@ cli.add_command(server_cmd, name="server")
 cli.add_command(observe_cmd, name="observe")
 cli.add_command(mcp_cmd, name="mcp")
 cli.add_command(policy_cmd, name="policy")
+cli.add_command(receipts_cmd, name="receipts")
 cli.add_command(verify_cmd, name="verify")
 cli.add_command(daemon_cmd, name="daemon")
