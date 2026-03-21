@@ -263,8 +263,39 @@ def hook_cmd(source: str) -> None:
                 sys.exit(2)
             sys.exit(0)
 
-    # Local evaluation
+    # Try daemon first (eliminates ~200ms Python startup on repeat calls).
+    from vectimus.cli.daemon_client import daemon_evaluate
+
+    daemon_result = daemon_evaluate(source, payload, str(project_path))
+    if daemon_result is not None:
+        if debug:
+            _log_stderr(f"daemon decision={daemon_result.get('decision')}")
+
+        verdict = daemon_result.get("decision", "allow")
+        receipt_id = daemon_result.get("receipt_id")
+
+        if verdict == DecisionVerdict.ESCALATE:
+            reason = daemon_result.get("reason") or "Flagged by Vectimus"
+            if receipt_id:
+                reason += f" (receipt: {receipt_id[:13]})"
+            matched = daemon_result.get("matched_policy_ids", [])
+            _log_stderr_overrides(matched)
+            _emit_deny(source, payload, reason, escalate=True)
+
+        if verdict == DecisionVerdict.DENY:
+            reason = daemon_result.get("reason") or "Denied by Vectimus"
+            if receipt_id:
+                reason += f" (receipt: {receipt_id[:13]})"
+            matched = daemon_result.get("matched_policy_ids", [])
+            _log_stderr_overrides(matched)
+            _emit_deny(source, payload, reason)
+
+        # ALLOW — exit cleanly
+        sys.exit(0)
+
+    # Inline fallback (daemon unavailable)
     if debug:
+        _log_stderr("daemon unavailable, using inline evaluation")
         if source == "cursor":
             cmd = payload.get("command") or (payload.get("tool_input") or {}).get("command")
             _log_stderr(f"hook={payload.get('hook_event_name')} command={cmd}")
