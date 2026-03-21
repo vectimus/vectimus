@@ -132,7 +132,7 @@ _GREP_LIKE_COMMANDS = frozenset(
 
 # Output redirect: > file or >> file (avoiding >>> or heredoc <<).
 _REDIRECT_RE = re.compile(
-    r"(?<![<>])"  # not preceded by < or >
+    r"(?<![0-9<>])"  # not preceded by digit, < or > (excludes 2>&1, 1>, etc.)
     r">{1,2}"  # > or >>
     r"\s*"
     r"""(?:"([^"]+)"|'([^']+)'|(\S+))"""  # quoted or unquoted path
@@ -148,7 +148,11 @@ _TEE_RE = re.compile(
 _SED_INPLACE_RE = re.compile(r"\bsed\s+.*?(?:-i\b|--in-place\b)")
 
 # python/python3 -c "open('file', 'w').write(...)" or open('file').write(...)
-_PYTHON_WRITE_RE = re.compile(r"""python3?\s+-c\s+.*?open\s*\(\s*(?:["'])([^"']+)["']""")
+# Matches either explicit write mode ('w', 'a', 'x') or .write() chained call.
+_PYTHON_WRITE_RE = re.compile(
+    r"""python3?\s+-c\s+.*?open\s*\(\s*(?:["'])([^"']+)["']"""
+    r"""(?:\s*,\s*["'][wax]|[^)]*\)\.write\s*\()"""
+)
 
 # dd of=file
 _DD_OF_RE = re.compile(r"\bdd\b.*?\bof=(\S+)")
