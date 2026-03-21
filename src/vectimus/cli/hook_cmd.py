@@ -264,7 +264,9 @@ def hook_cmd(source: str) -> None:
                     else:
                         _emit_deny(source, payload, reason)
                 print(json.dumps(hook_output))
-                sys.exit(2)
+                if source == "cursor":
+                    sys.exit(2)
+                sys.exit(0)
             sys.exit(0)
 
     # Local evaluation
