@@ -73,8 +73,9 @@ def _normalise_copilot(payload: dict[str, Any]) -> VectimusEvent:
         )
 
     command = _extract_command(tool_input)
+    shell_file_path: str | None = None
     if action_type == ActionType.SHELL_COMMAND and command:
-        action_type = _refine_shell_action(command)
+        action_type, shell_file_path = _refine_shell_action(command)
 
     # MCP fields — extract server/tool from mcp__server__tool naming convention.
     mcp_server: str | None = None
@@ -111,7 +112,7 @@ def _normalise_copilot(payload: dict[str, Any]) -> VectimusEvent:
             action_type=action_type,
             raw_tool_name=tool_name,
             command=command,
-            file_path=_extract_file_path(tool_input),
+            file_path=_extract_file_path(tool_input) or shell_file_path,
             url=_extract_url(tool_input),
             mcp_server=mcp_server,
             mcp_tool=mcp_tool,

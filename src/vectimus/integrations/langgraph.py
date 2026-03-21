@@ -123,7 +123,7 @@ def _infer_action_type(tool_name: str, tool_args: dict[str, Any]) -> str:
         if command:
             from vectimus.engine.normaliser import _refine_shell_action
 
-            base = _refine_shell_action(command)
+            base, _ = _refine_shell_action(command)
 
     return base
 

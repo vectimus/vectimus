@@ -91,19 +91,93 @@ _GIT_PREFIX = "git"
 
 _SHELL_WRAPPERS = ("sudo", "env", "nohup", "nice", "time", "exec", "command")
 
+# Commands that read file contents — the file is typically the last non-flag arg.
+_FILE_READ_COMMANDS = frozenset(
+    {
+        # Unix/macOS
+        "cat",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "strings",
+        "xxd",
+        "od",
+        "hexdump",
+        "bat",
+        "nl",
+        "tac",
+        "rev",
+        # Windows cmd
+        "type",
+        # Windows PowerShell (case-insensitive matching handled by _first_binary_lower)
+        "get-content",
+        "gc",
+    }
+)
 
-def _refine_shell_action(command: str) -> str:
-    """Detect infrastructure, package and git commands inside shell invocations."""
+# grep-family commands: file argument follows the pattern argument.
+_GREP_LIKE_COMMANDS = frozenset(
+    {
+        # Unix
+        "grep",
+        "egrep",
+        "fgrep",
+        # Windows cmd
+        "findstr",
+        # Windows PowerShell
+        "select-string",
+    }
+)
+
+# Output redirect: > file or >> file (avoiding >>> or heredoc <<).
+_REDIRECT_RE = re.compile(
+    r"(?<![<>])"  # not preceded by < or >
+    r">{1,2}"  # > or >>
+    r"\s*"
+    r"""(?:"([^"]+)"|'([^']+)'|(\S+))"""  # quoted or unquoted path
+)
+
+# tee [-a] file
+_TEE_RE = re.compile(
+    r"\btee\s+(?:-[a-zA-Z]+\s+)*"
+    r"""(?:"([^"]+)"|'([^']+)'|(\S+))"""
+)
+
+# sed -i (in-place edit) — extract the last non-flag argument as the file.
+_SED_INPLACE_RE = re.compile(r"\bsed\s+.*?(?:-i\b|--in-place\b)")
+
+# python/python3 -c "open('file', 'w').write(...)" or open('file').write(...)
+_PYTHON_WRITE_RE = re.compile(r"""python3?\s+-c\s+.*?open\s*\(\s*(?:["'])([^"']+)["']""")
+
+# dd of=file
+_DD_OF_RE = re.compile(r"\bdd\b.*?\bof=(\S+)")
+
+# cp/mv/copy/move/xcopy/robocopy: last argument is the destination (write target).
+_CP_MV_RE = re.compile(
+    r"\b(?:cp|mv|copy|move|xcopy|robocopy)\s+(?:-[a-zA-Z]+\s+|/[a-zA-Z]+\s+)*\S+\s+(\S+)\s*$",
+    re.IGNORECASE,
+)
+
+# PowerShell write cmdlets: Set-Content, Add-Content, Out-File
+# e.g. Set-Content -Path "file" -Value "data" or "data" | Out-File file
+_PS_WRITE_CMDLETS_RE = re.compile(
+    r"\b(?:Set-Content|Add-Content|Out-File|sc)\s+"
+    r"(?:.*?-Path\s+)?"
+    r"""(?:"([^"]+)"|'([^']+)'|(\S+))""",
+    re.IGNORECASE,
+)
+
+
+def _strip_shell_wrappers(command: str) -> str:
+    """Strip sudo, env, nohup and similar wrapper prefixes from a command."""
     stripped = command.strip()
-
-    # Strip common wrapper prefixes (sudo, env, nohup, nice, etc.)
     changed = True
     while changed:
         changed = False
         for wrapper in _SHELL_WRAPPERS:
             if stripped.startswith(wrapper + " "):
                 stripped = stripped[len(wrapper) :].strip()
-                # For `env`, skip flags (-i, -u) and VAR=val assignments.
                 if wrapper == "env":
                     while stripped:
                         token = stripped.split(None, 1)[0] if stripped else ""
@@ -112,20 +186,158 @@ def _refine_shell_action(command: str) -> str:
                         else:
                             break
                 changed = True
+    return stripped
 
+
+def _first_binary(stripped: str) -> str:
+    """Extract the first word of a command, stripping any absolute path.
+
+    Returns the binary name in lowercase so that Windows commands
+    (``Type``, ``GET-CONTENT``, etc.) match their frozenset entries.
+    """
     first_word = stripped.split()[0] if stripped.split() else ""
-
-    # Strip absolute path to get the binary name (e.g. /usr/bin/npm -> npm).
     if "/" in first_word:
         first_word = first_word.rsplit("/", 1)[-1]
+    # Strip Windows path prefix (e.g. C:\\Windows\\System32\\cmd.exe -> cmd.exe)
+    if "\\" in first_word:
+        first_word = first_word.rsplit("\\", 1)[-1]
+    # Strip common extensions (.exe, .cmd, .bat, .ps1)
+    for ext in (".exe", ".cmd", ".bat", ".ps1"):
+        if first_word.lower().endswith(ext):
+            first_word = first_word[: -len(ext)]
+            break
+    return first_word.lower()
+
+
+def _extract_last_non_flag_arg(args_str: str) -> str | None:
+    """Return the last token in *args_str* that does not start with ``-``.
+
+    Handles simple quoting (double and single quotes) but not escapes.
+    """
+    tokens: list[str] = []
+    i = 0
+    while i < len(args_str):
+        ch = args_str[i]
+        if ch in " \t":
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            end = args_str.find(ch, i + 1)
+            if end == -1:
+                tokens.append(args_str[i + 1 :])
+                break
+            tokens.append(args_str[i + 1 : end])
+            i = end + 1
+        else:
+            end = i
+            while end < len(args_str) and args_str[end] not in " \t":
+                end += 1
+            tokens.append(args_str[i:end])
+            i = end
+    # Return the last token that is not a flag.
+    for tok in reversed(tokens):
+        if not tok.startswith("-"):
+            return tok
+    return None
+
+
+def _detect_file_write(command: str) -> str | None:
+    """Detect file write patterns in a shell command and return the target path."""
+    # Output redirection: command > file or command >> file
+    # Check all matches and return the last one (most likely the actual target).
+    matches = list(_REDIRECT_RE.finditer(command))
+    if matches:
+        m = matches[-1]
+        return m.group(1) or m.group(2) or m.group(3)
+
+    # tee [-a] file
+    m = _TEE_RE.search(command)
+    if m:
+        return m.group(1) or m.group(2) or m.group(3)
+
+    # dd of=file
+    m = _DD_OF_RE.search(command)
+    if m:
+        return m.group(1)
+
+    # python -c "open('file').write(...)"
+    m = _PYTHON_WRITE_RE.search(command)
+    if m:
+        return m.group(1)
+
+    # sed -i (in-place edit)
+    if _SED_INPLACE_RE.search(command):
+        # The file is the last non-flag argument after the sed expression.
+        after_sed = command[command.index("sed") :]
+        target = _extract_last_non_flag_arg(after_sed.split(None, 1)[1] if " " in after_sed else "")
+        if target:
+            return target
+
+    # cp/mv/copy/move/xcopy/robocopy destination
+    m = _CP_MV_RE.search(command)
+    if m:
+        return m.group(1)
+
+    # PowerShell Set-Content, Add-Content, Out-File
+    m = _PS_WRITE_CMDLETS_RE.search(command)
+    if m:
+        return m.group(1) or m.group(2) or m.group(3)
+
+    return None
+
+
+def _detect_file_read(stripped: str, first_word: str) -> str | None:
+    """Detect file read commands and return the target path."""
+    if first_word in _FILE_READ_COMMANDS:
+        # Extract file argument: last non-flag argument.
+        args = stripped.split(None, 1)
+        if len(args) > 1:
+            return _extract_last_non_flag_arg(args[1])
+
+    if first_word in _GREP_LIKE_COMMANDS:
+        # grep [flags] pattern file — file is the last non-flag arg, but only
+        # if there are at least 2 non-flag args (pattern + file).
+        args = stripped.split(None, 1)
+        if len(args) > 1:
+            tokens = []
+            for tok in args[1].split():
+                if not tok.startswith("-"):
+                    tokens.append(tok)
+            # Need at least 2: pattern and file.
+            if len(tokens) >= 2:
+                return tokens[-1]
+
+    return None
+
+
+def _refine_shell_action(command: str) -> tuple[str, str | None]:
+    """Detect infrastructure, package, git commands and file operations.
+
+    Returns ``(action_type, extracted_file_path)``.  When the shell command
+    is actually a file read or write the action type is reclassified so that
+    existing Cedar policies on ``file_read`` / ``file_write`` also apply.
+    """
+    stripped = _strip_shell_wrappers(command)
+    first_word = _first_binary(stripped)
 
     if first_word in _INFRA_PREFIXES or first_word.startswith("kubectl"):
-        return ActionType.INFRASTRUCTURE
+        return ActionType.INFRASTRUCTURE, None
     if first_word in _PKG_PREFIXES:
-        return ActionType.PACKAGE_OPERATION
+        return ActionType.PACKAGE_OPERATION, None
     if first_word == _GIT_PREFIX:
-        return ActionType.GIT_OPERATION
-    return ActionType.SHELL_COMMAND
+        return ActionType.GIT_OPERATION, None
+
+    # Check for file writes first — they are higher risk than reads.
+    write_target = _detect_file_write(command)
+    if write_target:
+        return ActionType.FILE_WRITE, write_target
+
+    # Check for file read commands.
+    read_target = _detect_file_read(stripped, first_word)
+    if read_target:
+        return ActionType.FILE_READ, read_target
+
+    return ActionType.SHELL_COMMAND, None
 
 
 # ---------------------------------------------------------------------------
