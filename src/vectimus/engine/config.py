@@ -488,6 +488,22 @@ class VectimusConfig:
         data = self.effective_config(project_path) if project_path else self._data
         return data.get("identity", {}).get("identity_type", "human")
 
+    # -- Receipts -----------------------------------------------------------
+
+    def is_receipts_enabled(self, project_path: Path | None = None) -> bool:
+        """Check if governance receipts are enabled.  Default is True."""
+        data = self.effective_config(project_path) if project_path else self._data
+        return bool(data.get("receipts", {}).get("enabled", True))
+
+    def get_receipts_retention_days(self, project_path: Path | None = None) -> int:
+        """Return the receipt retention period in days.  Default is 7."""
+        data = self.effective_config(project_path) if project_path else self._data
+        return _safe_int(
+            data.get("receipts", {}).get("retention_days", 7),
+            default=7,
+            minimum=1,
+        )
+
     # -- Limits accessors ---------------------------------------------------
 
     def get_content_inspection_max_lines(self, project_path: Path | None = None) -> int:

@@ -80,6 +80,34 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
         config.set_server_url(server_url)
     click.echo(f"\n  Config: {config.path}")
 
+    # -- Generate keypair and copy public key to project --------------------
+    try:
+        from vectimus.engine.keys import copy_public_key_to_project, ensure_keypair
+
+        key_id = ensure_keypair()
+        click.echo(f"\n  Signing key: {key_id}")
+        dest = copy_public_key_to_project(key_id, Path.cwd())
+        click.echo(f"  Public key copied to: {dest}")
+    except Exception as exc:
+        click.echo(f"\n  Key setup skipped: {exc}", err=True)
+
+    # -- Ensure .vectimus/receipts/ is gitignored ---------------------------
+    _update_gitignore_for_receipts(Path.cwd())
+
+    # -- Clean up old receipts based on retention policy --------------------
+    try:
+        from vectimus.engine.receipts import cleanup_old_receipts
+
+        receipts_dir = Path.cwd() / ".vectimus" / "receipts"
+        if receipts_dir.exists():
+            removed = cleanup_old_receipts(
+                receipts_dir, config.get_receipts_retention_days()
+            )
+            if removed:
+                click.echo(f"  Cleaned up {removed} old receipt directory(ies)")
+    except Exception:
+        pass
+
     # Ensure the projects directory exists for per-project overrides.
     projects_dir = Path.home() / ".vectimus" / "projects"
     projects_dir.mkdir(parents=True, exist_ok=True)
@@ -121,6 +149,26 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
             "\nServer URL saved to config. Set VECTIMUS_API_KEY in your\n"
             "environment if the server requires authentication."
         )
+
+
+def _update_gitignore_for_receipts(project_root: Path) -> None:
+    """Ensure ``.vectimus/receipts/`` is in the project's ``.gitignore``."""
+    gitignore_path = project_root / ".gitignore"
+
+    if gitignore_path.exists():
+        content = gitignore_path.read_text()
+        # Already covered by a broader pattern or specific line
+        if ".vectimus/receipts/" in content or ".vectimus/" in content:
+            return
+        if not content.endswith("\n"):
+            content += "\n"
+        content += "\n# Vectimus governance receipts (local evidence)\n"
+        content += ".vectimus/receipts/\n"
+        gitignore_path.write_text(content)
+    else:
+        content = "# Vectimus governance receipts (local evidence)\n"
+        content += ".vectimus/receipts/\n"
+        gitignore_path.write_text(content)
 
 
 def _vectimus_cmd() -> str:

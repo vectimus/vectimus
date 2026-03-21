@@ -17,6 +17,7 @@ from vectimus.cli.rule_cmd import rule_cmd
 from vectimus.cli.server_cmd import server_cmd
 from vectimus.cli.status_cmd import status_cmd
 from vectimus.cli.test_cmd import test_cmd
+from vectimus.cli.verify_cmd import verify_cmd
 from vectimus.engine.config import VectimusConfig
 
 
@@ -126,3 +127,4 @@ cli.add_command(server_cmd, name="server")
 cli.add_command(observe_cmd, name="observe")
 cli.add_command(mcp_cmd, name="mcp")
 cli.add_command(policy_cmd, name="policy")
+cli.add_command(verify_cmd, name="verify")
