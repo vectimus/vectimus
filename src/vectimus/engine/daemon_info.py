@@ -12,21 +12,27 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 from pathlib import Path
 
 DAEMON_INFO_PATH = Path.home() / ".vectimus" / "daemon.json"
 
 
 def write_daemon_info(pid: int, port: int, token: str) -> None:
-    """Write daemon info to disk with user-only permissions."""
+    """Write daemon info to disk with user-only permissions.
+
+    Uses os.open with 0o600 at creation time to avoid a TOCTOU window
+    where the auth token would be briefly world-readable.
+    """
     DAEMON_INFO_PATH.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps({"pid": pid, "port": port, "token": token})
-    DAEMON_INFO_PATH.write_text(data)
+    fd = os.open(str(DAEMON_INFO_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        DAEMON_INFO_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    except OSError:
-        pass  # best-effort on platforms where chmod is limited
+        f = os.fdopen(fd, "w")
+    except BaseException:
+        os.close(fd)
+        raise
+    with f:
+        f.write(data)
 
 
 def read_daemon_info() -> dict | None:

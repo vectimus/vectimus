@@ -155,11 +155,11 @@ class DaemonServer:
             writer.write(json.dumps(response).encode() + b"\n")
             await writer.drain()
         except Exception as exc:
-            # Return error as a fail-open allow
+            # Fail closed — deny on unexpected errors, consistent with inline path
             try:
                 error_resp = {
-                    "decision": "allow",
-                    "reason": f"Daemon error: {exc}",
+                    "decision": "deny",
+                    "reason": f"Daemon error (fail closed): {exc}",
                     "matched_policy_ids": [],
                     "receipt_id": None,
                     "evaluation_time_ms": 0,
