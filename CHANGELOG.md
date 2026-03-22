@@ -5,7 +5,32 @@ All notable changes to Vectimus will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-03-22
+
+### Added
+
+- Cryptographic governance receipts with Ed25519 signing: every Cedar policy evaluation produces a signed JSON proof with RFC 8785 canonical JSON for deterministic hashing
+- `vectimus verify` CLI command for offline receipt verification
+- `vectimus receipts prune` CLI command for receipt retention management (`--days`, `--all`)
+- Persistent evaluation daemon: keeps Cedar engine warm in memory, auto-starts on first hook call, eliminates ~200ms Python startup cost
+- Shell command normalizer detects inline file I/O in Python, Node, Ruby and Perl scripts and reclassifies to `file_read`/`file_write`
+- `src/vectimus/__main__.py` for `python -m vectimus` support
+
+### Fixed
+
+- Daemon on Windows: added `__main__.py`, fixed `os.kill(pid, 0)` unreliability with `OpenProcess`/`GetExitCodeProcess`, fixed `DETACHED_PROCESS` + `CREATE_NO_WINDOW` console flash, fixed `msvcrt.locking` at wrong file offset
+- Restored Unix domain sockets on Unix/macOS (removed during TCP refactor) for stronger auth via filesystem permissions. TCP localhost + auth token kept for Windows only
+- Claude Code hook deny enforcement: exit code and JSON format corrected so denials are no longer ignored
+- Shell command normalizer bypass: agents can no longer wrap file operations in inline scripts to bypass policies
+- Normalizer false positives: file descriptor redirects (`2>&1`) and read-only `open()` calls no longer misclassified
+- ADK and LangGraph integrations now thread shell file paths to Cedar policies for path-based matching
+- Windows JSONL audit log file locking: seek to byte 0 so all writers contend on the same range
+
+### Changed
+
+- Daemon uses Unix sockets on Unix/macOS, TCP localhost with auth token on Windows only
+- Daemon runs receipt retention cleanup automatically to prevent unbounded disk growth
+- Receipt ID included in DENY messages and audit log entries for traceability
 
 ## [0.18.1] - 2026-03-17
 

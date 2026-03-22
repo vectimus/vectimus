@@ -5,6 +5,17 @@ from __future__ import annotations
 import click
 
 
+def _notify_daemon_reload() -> None:
+    """Tell the daemon to reload if it's running.  Silent on failure."""
+    try:
+        from vectimus.cli.daemon_client import daemon_reload
+
+        if daemon_reload():
+            click.echo("Daemon reloaded.")
+    except Exception:
+        pass
+
+
 @click.group("policy")
 def policy_cmd() -> None:
     """Manage policy updates and sync status."""
@@ -29,6 +40,7 @@ def update(api_url: str | None) -> None:
         )
         for pack, count in sorted(result.packs_updated.items()):
             click.echo(f"  {pack}: {count} policies")
+        _notify_daemon_reload()
     else:
         click.echo(f"Already up to date (v{result.version})")
 

@@ -9,6 +9,17 @@ import click
 from vectimus.engine.loader import PolicyLoader
 
 
+def _notify_daemon_reload() -> None:
+    """Tell the daemon to reload if it's running.  Silent on failure."""
+    try:
+        from vectimus.cli.daemon_client import daemon_reload
+
+        if daemon_reload():
+            click.echo("Daemon reloaded.")
+    except Exception:
+        pass
+
+
 @click.group("rule")
 def rule_cmd() -> None:
     """Manage individual policy rules."""
@@ -99,6 +110,8 @@ def rule_disable(
             f"Config: {project_local_config_path(project_path)}"
         )
 
+    _notify_daemon_reload()
+
 
 @rule_cmd.command("enable")
 @click.argument("rule_id")
@@ -145,6 +158,8 @@ def rule_enable(
         from vectimus.engine.config import project_local_config_path
 
         click.echo(f"Config: {project_local_config_path(project_path)}")
+
+    _notify_daemon_reload()
 
 
 @rule_cmd.command("show")
@@ -227,6 +242,7 @@ def rule_enforce(
         scope = "globally" if is_global else f"for {project_path}"
         click.echo(f"Enforcement override cleared {scope} for '{rule_id}'.")
         click.echo(f"Effective level: {the_rule.enforcement} (from policy annotation)")
+        _notify_daemon_reload()
         return
 
     if level is None:
@@ -236,6 +252,7 @@ def rule_enforce(
     loader.config.set_enforcement_override(rule_id, level, project_path)
     scope = "globally" if is_global else f"for {project_path}"
     click.echo(f"Rule '{rule_id}' enforcement set to '{level}' {scope}.")
+    _notify_daemon_reload()
 
 
 @rule_cmd.command("overrides")

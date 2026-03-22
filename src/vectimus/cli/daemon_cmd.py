@@ -49,8 +49,7 @@ def daemon_start(foreground: bool, idle_timeout: int) -> None:
                 "stdout": subprocess.DEVNULL,
                 "stderr": subprocess.DEVNULL,
                 "creationflags": (
-                    subprocess.CREATE_NEW_PROCESS_GROUP
-                    | subprocess.CREATE_NO_WINDOW
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
                 ),
             }
             subprocess.Popen(
@@ -138,6 +137,21 @@ def daemon_stop() -> None:
         except ProcessLookupError:
             click.echo("Daemon is not running (stale info file).")
             remove_daemon_info()
+
+
+@daemon_cmd.command("reload")
+def daemon_reload() -> None:
+    """Reload policies and config in the running daemon.
+
+    Flushes cached policy engines so the next evaluation picks up
+    changes from disk (rule disable/enable, pack changes, etc.).
+    """
+    from vectimus.cli.daemon_client import daemon_reload as _reload
+
+    if _reload():
+        click.echo("Daemon reloaded.")
+    else:
+        click.echo("Daemon is not running (nothing to reload).")
 
 
 @daemon_cmd.command("status")

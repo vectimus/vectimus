@@ -198,6 +198,17 @@ class DaemonServer:
                 self._shutdown_event.set()
                 return
 
+            # Handle reload request -- flush cached engines so the next
+            # evaluation picks up config/policy changes from disk.
+            if request.get("reload"):
+                self._engines.clear()
+                logger.info("daemon_reload", reason="reload request received")
+                writer.write(json.dumps({"status": "reloaded"}).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
             response = await asyncio.to_thread(self._evaluate, request)
 
             # Schedule receipt cleanup on first request per project
