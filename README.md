@@ -1,6 +1,6 @@
 # Vectimus
 
-**Cedar policies for every AI agent action. Coding tools and agentic frameworks. Every evaluation under 5ms. Zero config.**
+**Cedar policies for every AI agent action. Coding tools and agentic frameworks. Every evaluation under 10ms. Zero config.**
 
 [![PyPI](https://img.shields.io/pypi/v/vectimus)](https://pypi.org/project/vectimus/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
