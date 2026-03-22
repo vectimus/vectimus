@@ -10,6 +10,7 @@ import sys
 import click
 
 from vectimus.engine.daemon_info import (
+    _IS_WINDOWS,
     is_daemon_alive,
     read_daemon_info,
     remove_daemon_info,
@@ -42,13 +43,14 @@ def daemon_start(foreground: bool, idle_timeout: int) -> None:
     from vectimus.engine.daemon import DaemonServer
 
     if not foreground:
-        if sys.platform == "win32":
+        if _IS_WINDOWS:
             # Windows: spawn a detached child process running in foreground mode
             kwargs: dict = {
                 "stdout": subprocess.DEVNULL,
                 "stderr": subprocess.DEVNULL,
                 "creationflags": (
-                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.CREATE_NO_WINDOW
                 ),
             }
             subprocess.Popen(
@@ -105,12 +107,37 @@ def daemon_stop() -> None:
         remove_daemon_info()
         return
 
-    try:
-        os.kill(info["pid"], signal.SIGTERM)
-        click.echo(f"Sent SIGTERM to daemon (pid {info['pid']}).")
-    except ProcessLookupError:
-        click.echo("Daemon is not running (stale info file).")
-        remove_daemon_info()
+    pid = info["pid"]
+    if _IS_WINDOWS:
+        # Windows: os.kill(SIGTERM) calls TerminateProcess which skips
+        # cleanup.  Send a shutdown request over TCP instead.
+        import json
+        import socket
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(("127.0.0.1", info["port"]))
+            request = json.dumps({"token": info["token"], "shutdown": True}) + "\n"
+            sock.sendall(request.encode())
+            sock.recv(1024)
+            sock.close()
+            click.echo(f"Sent shutdown to daemon (pid {pid}).")
+        except Exception:
+            # Fallback: force kill + clean up info file
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            remove_daemon_info()
+            click.echo(f"Force-stopped daemon (pid {pid}).")
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            click.echo(f"Sent SIGTERM to daemon (pid {pid}).")
+        except ProcessLookupError:
+            click.echo("Daemon is not running (stale info file).")
+            remove_daemon_info()
 
 
 @daemon_cmd.command("status")
@@ -127,4 +154,10 @@ def daemon_status() -> None:
         return
 
     click.echo(f"Daemon: running (pid {info['pid']})")
-    click.echo(f"Port:   {info['port']}")
+    if _IS_WINDOWS:
+        click.echo(f"Port:   {info['port']}")
+    else:
+        from vectimus.engine.daemon_info import SOCKET_PATH
+
+        socket_ok = SOCKET_PATH.exists()
+        click.echo(f"Socket: {'ready' if socket_ok else 'not found'} ({SOCKET_PATH})")

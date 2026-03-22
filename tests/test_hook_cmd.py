@@ -201,7 +201,10 @@ class TestEscalateFailsClosed:
             "hook_event_name": "PreToolUse",
             "cwd": str(tmp_path),
         }
-        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("claude-code", payload)
 
@@ -228,7 +231,10 @@ class TestEscalateFailsClosed:
             "hook_event_name": "beforeShellExecution",
             "cwd": str(tmp_path),
         }
-        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("cursor", payload)
 
@@ -254,7 +260,10 @@ class TestEscalateFailsClosed:
             "hookEventName": "PreToolUse",
             "cwd": str(tmp_path),
         }
-        with patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls:
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
             mock_engine_cls.return_value.evaluate.return_value = escalate_decision
             exit_code, output = _run_hook("copilot", payload)
 

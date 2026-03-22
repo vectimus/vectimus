@@ -25,11 +25,17 @@ if sys.platform == "win32":
     import msvcrt
 
     def _lock(f) -> None:  # type: ignore[type-arg]
-        """Lock file on Windows."""
+        """Lock file on Windows.
+
+        Seek to byte 0 and lock a 1-byte range so all writers contend
+        on the same region regardless of append position.
+        """
+        f.seek(0)
         msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
 
     def _unlock(f) -> None:  # type: ignore[type-arg]
         """Unlock file on Windows."""
+        f.seek(0)
         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 else:
     import fcntl
