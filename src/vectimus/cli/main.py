@@ -23,6 +23,17 @@ from vectimus.cli.verify_cmd import verify_cmd
 from vectimus.engine.config import VectimusConfig
 
 
+def _notify_daemon_reload() -> None:
+    """Tell the daemon to reload if it's running.  Silent on failure."""
+    try:
+        from vectimus.cli.daemon_client import daemon_reload
+
+        if daemon_reload():
+            click.echo("Daemon reloaded.")
+    except Exception:
+        pass
+
+
 @click.group()
 @click.version_option(package_name="vectimus")
 def cli() -> None:
@@ -85,6 +96,7 @@ def mcp_allow(server: str) -> None:
     config.mcp_allow_server(server)
     click.echo(f"Approved MCP server: {server}")
     click.echo(f"  Agents can now call tools on the '{server}' MCP server.")
+    _notify_daemon_reload()
 
 
 @mcp_cmd.command("deny")
@@ -102,6 +114,7 @@ def mcp_deny(server: str) -> None:
     config.mcp_deny_server(server)
     click.echo(f"Removed MCP server: {server}")
     click.echo(f"  Agents can no longer call tools on the '{server}' MCP server.")
+    _notify_daemon_reload()
 
 
 @mcp_cmd.command("list")

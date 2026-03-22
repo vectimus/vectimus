@@ -7,6 +7,17 @@ import click
 from vectimus.engine.loader import PolicyLoader
 
 
+def _notify_daemon_reload() -> None:
+    """Tell the daemon to reload if it's running.  Silent on failure."""
+    try:
+        from vectimus.cli.daemon_client import daemon_reload
+
+        if daemon_reload():
+            click.echo("Daemon reloaded.")
+    except Exception:
+        pass
+
+
 @click.group("pack")
 def pack_cmd() -> None:
     """Manage policy packs."""
@@ -49,6 +60,7 @@ def pack_enable(name: str, config_path: str | None, policy_dir: str | None) -> N
 
     loader.config.set_pack_enabled(name, True)
     click.echo(f"Pack '{name}' enabled.  {pack.rule_count} rules now active.")
+    _notify_daemon_reload()
 
 
 @pack_cmd.command("disable")
@@ -83,3 +95,4 @@ def pack_disable(
 
     loader.config.set_pack_enabled(name, False)
     click.echo(f"Pack '{name}' disabled.  {pack.rule_count} rules now inactive.")
+    _notify_daemon_reload()

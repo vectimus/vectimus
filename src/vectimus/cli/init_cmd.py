@@ -100,9 +100,7 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
 
         receipts_dir = Path.cwd() / ".vectimus" / "receipts"
         if receipts_dir.exists():
-            removed = cleanup_old_receipts(
-                receipts_dir, config.get_receipts_retention_days()
-            )
+            removed = cleanup_old_receipts(receipts_dir, config.get_receipts_retention_days())
             if removed:
                 click.echo(f"  Cleaned up {removed} old receipt directory(ies)")
     except Exception:

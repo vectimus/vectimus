@@ -117,6 +117,44 @@ def _send_request_tcp(source: str, payload: dict, cwd: str, info: dict) -> dict 
         return None
 
 
+def daemon_reload() -> bool:
+    """Send a reload request to the daemon.  Returns True if successful."""
+    if not is_daemon_alive(read_daemon_info() or {}):
+        return False
+
+    try:
+        if _IS_WINDOWS:
+            info = read_daemon_info()
+            if info is None:
+                return False
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(_SOCKET_TIMEOUT)
+            sock.connect(("127.0.0.1", info["port"]))
+            request = json.dumps({"token": info["token"], "reload": True}) + "\n"
+        else:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(_SOCKET_TIMEOUT)
+            sock.connect(str(SOCKET_PATH))
+            request = json.dumps({"reload": True}) + "\n"
+
+        sock.sendall(request.encode())
+
+        data = b""
+        while b"\n" not in data:
+            chunk = sock.recv(8192)
+            if not chunk:
+                break
+            data += chunk
+        sock.close()
+
+        if data.strip():
+            resp = json.loads(data.decode())
+            return resp.get("status") == "reloaded"
+    except Exception:
+        pass
+    return False
+
+
 def _try_auto_start() -> bool:
     """Spawn the daemon in the background.  Returns True if daemon becomes ready."""
     if _IS_WINDOWS:
@@ -141,8 +179,7 @@ def _try_auto_start() -> bool:
         }
         if _IS_WINDOWS:
             kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.CREATE_NO_WINDOW
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
         else:
             kwargs["start_new_session"] = True
