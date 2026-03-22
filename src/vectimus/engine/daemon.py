@@ -114,13 +114,15 @@ class DaemonServer:
         # Write PID file
         write_pid_file(os.getpid())
 
-        # Start server
+        # Start server with deferred serving so we can set permissions
+        # before accepting connections (avoids TOCTOU window in /tmp).
         self._server = await asyncio.start_unix_server(
             self._handle_connection,
             path=str(SOCKET_PATH),
+            start_serving=False,
         )
-        # Make socket accessible only to the owner
         SOCKET_PATH.chmod(0o600)
+        await self._server.start_serving()
 
         logger.info("daemon_started", socket=str(SOCKET_PATH), pid=os.getpid())
 

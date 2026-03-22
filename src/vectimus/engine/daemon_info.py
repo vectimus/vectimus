@@ -48,8 +48,19 @@ def write_daemon_info(pid: int, port: int, token: str) -> None:
 
 
 def write_pid_file(pid: int) -> None:
-    """Write the daemon PID file (Unix only)."""
-    PID_PATH.write_text(str(pid))
+    """Write the daemon PID file (Unix only).
+
+    Uses os.open with 0o600 at creation time to prevent symlink attacks
+    and avoid a TOCTOU window in /tmp.
+    """
+    fd = os.open(str(PID_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        f = os.fdopen(fd, "w")
+    except BaseException:
+        os.close(fd)
+        raise
+    with f:
+        f.write(str(pid))
 
 
 def read_daemon_info() -> dict | None:
