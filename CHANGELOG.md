@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vectimus verify` CLI command for offline receipt verification
 - `vectimus receipts prune` CLI command for receipt retention management (`--days`, `--all`)
 - Persistent evaluation daemon: keeps Cedar engine warm in memory, auto-starts on first hook call, eliminates ~200ms Python startup cost
+- `vectimus daemon reload` CLI command to flush cached policy engines
 - Shell command normalizer detects inline file I/O in Python, Node, Ruby and Perl scripts and reclassifies to `file_read`/`file_write`
 - `src/vectimus/__main__.py` for `python -m vectimus` support
 
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Daemon uses Unix sockets on Unix/macOS, TCP localhost with auth token on Windows only
+- Daemon auto-reloads when CLI commands change config (rule disable/enable, pack toggle, mcp allow/deny, policy update)
 - Daemon runs receipt retention cleanup automatically to prevent unbounded disk growth
 - Receipt ID included in DENY messages and audit log entries for traceability
 
