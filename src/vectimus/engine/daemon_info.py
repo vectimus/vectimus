@@ -95,16 +95,16 @@ def is_daemon_alive(info: dict | None = None) -> bool:
         import ctypes
         import ctypes.wintypes
 
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        STILL_ACTIVE = 259
+        process_query_limited_info = 0x1000
+        still_active = 259
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        handle = kernel32.OpenProcess(process_query_limited_info, False, pid)
         if not handle:
             return False
         try:
             exit_code = ctypes.wintypes.DWORD()
             if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-                return exit_code.value == STILL_ACTIVE
+                return exit_code.value == still_active
             return False
         finally:
             kernel32.CloseHandle(handle)
