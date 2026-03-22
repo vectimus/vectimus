@@ -1,11 +1,13 @@
 """Persistent evaluation daemon.
 
 Keeps the PolicyEngine warm in memory and accepts evaluation requests
-over TCP localhost with auth token.  Eliminates the ~200ms Python
-startup cost on every hook invocation.
+over a Unix domain socket (Unix/macOS) or TCP localhost with auth token
+(Windows).  Eliminates the ~200ms Python startup cost on every hook
+invocation.
 
 Protocol: one JSON line per connection (request), one JSON line back
-(response), then close.  Every request must include the auth token.
+(response), then close.  On Windows every request must include the
+auth token.  On Unix the socket's filesystem permissions handle auth.
 """
 
 from __future__ import annotations
@@ -23,15 +25,20 @@ import structlog
 
 from vectimus.engine.audit import write_audit
 from vectimus.engine.daemon_info import (
+    _IS_WINDOWS,
     is_daemon_alive,
     read_daemon_info,
     remove_daemon_info,
     write_daemon_info,
+    write_pid_file,
 )
 from vectimus.engine.evaluator import PolicyEngine
 from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import DecisionVerdict
 from vectimus.engine.normaliser import normalise
+
+if not _IS_WINDOWS:
+    from vectimus.engine.daemon_info import PID_PATH, SOCKET_PATH
 
 logger = structlog.get_logger(__name__)
 
@@ -51,7 +58,10 @@ class _CachedEngine:
 
 
 class DaemonServer:
-    """Asyncio TCP server for persistent policy evaluation."""
+    """Asyncio server for persistent policy evaluation.
+
+    Uses Unix domain sockets on Unix/macOS and TCP localhost on Windows.
+    """
 
     def __init__(self, idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> None:
         self._engines: dict[tuple[str, bool], _CachedEngine] = {}
@@ -64,6 +74,58 @@ class DaemonServer:
 
     async def start(self) -> None:
         """Start the daemon server."""
+        if _IS_WINDOWS:
+            await self._start_tcp()
+        else:
+            await self._start_unix()
+
+        # Install signal handlers
+        loop = asyncio.get_running_loop()
+        if _IS_WINDOWS:
+            signal.signal(signal.SIGTERM, lambda *_: self._shutdown_event.set())
+            signal.signal(signal.SIGINT, lambda *_: self._shutdown_event.set())
+        else:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda: self._shutdown_event.set())
+
+        # Run until shutdown
+        idle_task = asyncio.create_task(self._idle_watchdog())
+        await self._shutdown_event.wait()
+        idle_task.cancel()
+        await self.shutdown()
+
+    async def _start_unix(self) -> None:
+        """Start Unix domain socket server."""
+        # Check for existing daemon
+        if SOCKET_PATH.exists():
+            if PID_PATH.exists():
+                try:
+                    pid = int(PID_PATH.read_text().strip())
+                    os.kill(pid, 0)
+                    print(
+                        f"vectimus: daemon already running (pid {pid})",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                except (ProcessLookupError, ValueError, OSError):
+                    pass  # stale
+            SOCKET_PATH.unlink(missing_ok=True)
+
+        # Write PID file
+        write_pid_file(os.getpid())
+
+        # Start server
+        self._server = await asyncio.start_unix_server(
+            self._handle_connection,
+            path=str(SOCKET_PATH),
+        )
+        # Make socket accessible only to the owner
+        SOCKET_PATH.chmod(0o600)
+
+        logger.info("daemon_started", socket=str(SOCKET_PATH), pid=os.getpid())
+
+    async def _start_tcp(self) -> None:
+        """Start TCP localhost server (Windows)."""
         # Check for existing daemon
         info = read_daemon_info()
         if info and is_daemon_alive(info):
@@ -94,22 +156,6 @@ class DaemonServer:
 
         logger.info("daemon_started", port=port, pid=os.getpid())
 
-        # Install signal handlers
-        loop = asyncio.get_running_loop()
-        if sys.platform != "win32":
-            for sig in (signal.SIGTERM, signal.SIGINT):
-                loop.add_signal_handler(sig, lambda: self._shutdown_event.set())
-        else:
-            # Windows: signal handlers via signal module (less reliable but functional)
-            signal.signal(signal.SIGTERM, lambda *_: self._shutdown_event.set())
-            signal.signal(signal.SIGINT, lambda *_: self._shutdown_event.set())
-
-        # Run until shutdown
-        idle_task = asyncio.create_task(self._idle_watchdog())
-        await self._shutdown_event.wait()
-        idle_task.cancel()
-        await self.shutdown()
-
     async def _handle_connection(
         self,
         reader: asyncio.StreamReader,
@@ -126,8 +172,8 @@ class DaemonServer:
 
             request = json.loads(line.decode())
 
-            # Verify auth token
-            if request.get("token") != self._token:
+            # Verify auth token on Windows (Unix uses socket permissions)
+            if _IS_WINDOWS and request.get("token") != self._token:
                 error_resp = {
                     "decision": "deny",
                     "reason": "Invalid daemon auth token",
@@ -391,7 +437,7 @@ class DaemonServer:
                 return
 
     async def shutdown(self) -> None:
-        """Clean shutdown: close server, remove daemon info."""
+        """Clean shutdown: close server, remove socket/info files."""
         if self._server:
             self._server.close()
             await self._server.wait_closed()
