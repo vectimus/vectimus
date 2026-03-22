@@ -189,6 +189,15 @@ class DaemonServer:
                 await writer.wait_closed()
                 return
 
+            # Handle shutdown request
+            if request.get("shutdown"):
+                writer.write(json.dumps({"status": "stopping"}).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                self._shutdown_event.set()
+                return
+
             response = await asyncio.to_thread(self._evaluate, request)
 
             # Schedule receipt cleanup on first request per project

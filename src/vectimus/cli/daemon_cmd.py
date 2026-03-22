@@ -108,15 +108,36 @@ def daemon_stop() -> None:
         return
 
     pid = info["pid"]
-    try:
-        if _IS_WINDOWS:
+    if _IS_WINDOWS:
+        # Windows: os.kill(SIGTERM) calls TerminateProcess which skips
+        # cleanup.  Send a shutdown request over TCP instead.
+        import json
+        import socket
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(("127.0.0.1", info["port"]))
+            request = json.dumps({"token": info["token"], "shutdown": True}) + "\n"
+            sock.sendall(request.encode())
+            sock.recv(1024)
+            sock.close()
+            click.echo(f"Sent shutdown to daemon (pid {pid}).")
+        except Exception:
+            # Fallback: force kill + clean up info file
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            remove_daemon_info()
+            click.echo(f"Force-stopped daemon (pid {pid}).")
+    else:
+        try:
             os.kill(pid, signal.SIGTERM)
-        else:
-            os.kill(pid, signal.SIGTERM)
-        click.echo(f"Sent SIGTERM to daemon (pid {pid}).")
-    except ProcessLookupError:
-        click.echo("Daemon is not running (stale info file).")
-        remove_daemon_info()
+            click.echo(f"Sent SIGTERM to daemon (pid {pid}).")
+        except ProcessLookupError:
+            click.echo("Daemon is not running (stale info file).")
+            remove_daemon_info()
 
 
 @daemon_cmd.command("status")

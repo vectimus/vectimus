@@ -53,7 +53,7 @@ def write_pid_file(pid: int) -> None:
     Uses os.open with 0o600 at creation time to prevent symlink attacks
     and avoid a TOCTOU window in /tmp.
     """
-    fd = os.open(str(PID_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(str(PID_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     try:
         f = os.fdopen(fd, "w")
     except BaseException:
