@@ -5,6 +5,12 @@ All notable changes to Vectimus will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-03-23
+
+### Added
+
+- `--ci` flag for `vectimus init`: suppresses all interactive prompts for CI/CD pipelines. MCP servers are discovered but not allowed unless `--allow-mcp` is also passed.
+
 ## [0.19.0] - 2026-03-22
 
 ### Added
