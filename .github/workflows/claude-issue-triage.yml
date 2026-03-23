@@ -12,7 +12,6 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-      id-token: write
 
     steps:
       - name: Checkout repository
@@ -21,11 +20,10 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude Issue Triage
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@v1.0.77
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
-          claude_args: "--dangerously-skip-permissions"
           show_full_output: true
           prompt: |
             You are triaging issue #${{ github.event.issue.number }} in ${{ github.repository }}.
