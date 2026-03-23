@@ -71,6 +71,8 @@ class DaemonServer:
         self._shutdown_event = asyncio.Event()
         self._cleaned_projects: set[Path] = set()
         self._token: str = ""
+        # Temporary rule disables: (project_path, rule_id) -> expiry (monotonic)
+        self._temp_disables: dict[tuple[str, str], float] = {}
 
     async def start(self) -> None:
         """Start the daemon server."""
@@ -204,6 +206,34 @@ class DaemonServer:
                 self._engines.clear()
                 logger.info("daemon_reload", reason="reload request received")
                 writer.write(json.dumps({"status": "reloaded"}).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            # Handle temp_disable request -- add a temporary rule disable
+            # that lives in daemon memory only.
+            if request.get("temp_disable"):
+                resp = self._handle_temp_disable(request)
+                writer.write(json.dumps(resp).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            # Handle clear_temp_disable -- remove a temp disable early.
+            if request.get("clear_temp_disable"):
+                resp = self._handle_clear_temp_disable(request)
+                writer.write(json.dumps(resp).encode() + b"\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            # Handle query_temp_disables -- list active temp disables.
+            if request.get("query_temp_disables"):
+                resp = self._handle_query_temp_disables(request)
+                writer.write(json.dumps(resp).encode() + b"\n")
                 await writer.drain()
                 writer.close()
                 await writer.wait_closed()
@@ -403,18 +433,119 @@ class DaemonServer:
         receipts_dir = project_path / ".vectimus" / "receipts"
         _write_receipt_sync(receipt, receipts_dir)
 
+    def _active_temp_disables(self, project_path: str) -> set[str]:
+        """Return rule IDs with active (unexpired) temp disables for a project.
+
+        Also lazily cleans up expired entries.
+        """
+        now = time.monotonic()
+        active: set[str] = set()
+        expired_keys: list[tuple[str, str]] = []
+
+        for (proj, rule_id), expires_at in self._temp_disables.items():
+            if proj != project_path:
+                continue
+            if now < expires_at:
+                active.add(rule_id)
+            else:
+                expired_keys.append((proj, rule_id))
+
+        for key in expired_keys:
+            del self._temp_disables[key]
+
+        return active
+
+    def _handle_temp_disable(self, request: dict) -> dict:
+        """Add a temporary rule disable."""
+        rule_id = request["temp_disable"]
+        project = request.get("project", "")
+        duration_s = request.get("duration_s", 0)
+
+        if not rule_id or not project or duration_s <= 0:
+            return {
+                "status": "error",
+                "reason": "rule_id, project, and positive duration_s required",
+            }
+
+        expires_at = time.monotonic() + duration_s
+        key = (project, rule_id)
+        self._temp_disables[key] = expires_at
+
+        # Invalidate cached engine for this project so the temp disable
+        # takes effect on the next evaluation.
+        self._invalidate_project_engines(project)
+
+        logger.info(
+            "temp_disable_added",
+            rule_id=rule_id,
+            project=project,
+            duration_s=duration_s,
+        )
+        return {"status": "ok", "rule_id": rule_id, "duration_s": duration_s}
+
+    def _handle_clear_temp_disable(self, request: dict) -> dict:
+        """Remove a temporary rule disable early."""
+        rule_id = request["clear_temp_disable"]
+        project = request.get("project", "")
+        key = (project, rule_id)
+
+        if key in self._temp_disables:
+            del self._temp_disables[key]
+            self._invalidate_project_engines(project)
+            logger.info("temp_disable_cleared", rule_id=rule_id, project=project)
+            return {"status": "ok", "rule_id": rule_id}
+
+        return {"status": "not_found", "rule_id": rule_id}
+
+    def _handle_query_temp_disables(self, request: dict) -> dict:
+        """List active temp disables, optionally filtered by project."""
+        project_filter = request.get("project")
+        now = time.monotonic()
+        result: list[dict] = []
+
+        for (proj, rule_id), expires_at in list(self._temp_disables.items()):
+            remaining = expires_at - now
+            if remaining <= 0:
+                del self._temp_disables[(proj, rule_id)]
+                continue
+            if project_filter and proj != project_filter:
+                continue
+            result.append(
+                {
+                    "rule_id": rule_id,
+                    "project": proj,
+                    "remaining_s": round(remaining, 1),
+                }
+            )
+
+        return {"status": "ok", "temp_disables": result}
+
+    def _invalidate_project_engines(self, project_path: str) -> None:
+        """Remove cached engines for a specific project."""
+        keys_to_remove = [k for k in self._engines if k[0] == project_path]
+        for k in keys_to_remove:
+            del self._engines[k]
+
     def _get_engine(self, project_path: Path) -> _CachedEngine:
         """Get or create a cached PolicyEngine for the given project."""
-        loader = PolicyLoader(project_path=project_path)
+        temp_disabled = self._active_temp_disables(str(project_path))
+        loader = PolicyLoader(
+            project_path=project_path,
+            extra_disabled_rules=temp_disabled if temp_disabled else None,
+        )
         observe = os.environ.get("VECTIMUS_OBSERVE", "").lower() in ("1", "true", "yes")
         if not observe:
             observe = loader.config.is_observe_mode()
 
+        # Include temp disable set in cache key so engine is rebuilt when
+        # temp disables change (added, cleared, or expired).
         key = (str(project_path), observe)
         cached = self._engines.get(key)
 
         if cached and (time.monotonic() - cached.created_at) < ENGINE_CACHE_TTL:
-            return cached
+            # Check if temp disables changed since engine was cached.
+            if cached.loader._extra_disabled_rules == temp_disabled:
+                return cached
 
         engine = PolicyEngine(loader=loader, observe=observe)
         cached = _CachedEngine(engine, loader)

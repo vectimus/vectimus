@@ -5,6 +5,14 @@ All notable changes to Vectimus will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Temporary rule disabling with `vectimus rule disable <rule_id> --for <duration>`: disables a rule for a specified duration (e.g. `30m`, `2h`, `1h30m`) without writing to disk. Lives in daemon memory only and reverts automatically on expiry or daemon restart. Auto-starts daemon if not running.
+- `vectimus rule enable` now also clears any active temp disable for the rule
+- `vectimus rule list` shows temp-disabled rules with remaining time (e.g. `temp (24m)`)
+
 ## [0.19.1] - 2026-03-23
 
 ### Added
