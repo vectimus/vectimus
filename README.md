@@ -198,16 +198,18 @@ agent = LlmAgent(
 │             │◀────│               │◀────│              │◀────│ escalate │
 └─────────────┘     └───────────────┘     └──────────────┘     └──────────┘
                            │
-                           ▼
-                    ┌──────────────┐
-                    │  Audit Log   │
-                    │  (JSONL)     │
-                    └──────────────┘
+                     ┌─────┴─────┐
+                     ▼           ▼
+              ┌──────────┐ ┌─────────────┐
+              │Audit Log │ │Signed Receipt│
+              │ (JSONL)  │ │ (Ed25519)   │
+              └──────────┘ └─────────────┘
 ```
 
 - **Normaliser** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
 - **Cedar Engine** evaluates all loaded policies deterministically. No LLM in the loop. Same input, same decision.
 - **Audit Log** records every decision with full context for compliance evidence and incident investigation
+- **Signed Receipt** every evaluation produces an Ed25519-signed JSON receipt. Tamper-evident, offline-verifiable with `vectimus verify`
 
 Evaluation is entirely local. Zero telemetry. The only network call is a background policy update check every 24 hours (disable with `vectimus policy auto-update off`). [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
 
@@ -254,6 +256,18 @@ vectimus rule overrides                                  # View overrides
 ```
 
 Overrides live in `.vectimus/config.toml` in the project root. The `.vectimus/` directory is protected by policy -- agents cannot modify it.
+
+## Daemon
+
+The evaluation daemon auto-starts on the first hook call and keeps the Cedar engine warm in memory. Reduces latency from ~200ms (cold Python startup) to under 10ms.
+
+```bash
+vectimus daemon status   # Check if running
+vectimus daemon reload   # Pick up config changes immediately
+vectimus daemon stop     # Manual stop (restarts automatically)
+```
+
+Config changes via `rule disable`, `pack enable`, `mcp allow` etc. automatically reload the daemon. Works on macOS, Linux and Windows.
 
 ## Server mode
 
