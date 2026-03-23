@@ -19,6 +19,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install and initialise governance
+        run: |
+          pip install vectimus
+          vectimus init --ci
+
       - name: Run Claude Issue Triage
         uses: anthropics/claude-code-action@v1.0.77
         with:
