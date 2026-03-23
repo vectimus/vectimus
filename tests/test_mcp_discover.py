@@ -276,6 +276,28 @@ class TestInitMcpFlag:
         assert "Allow slack?" in result.output
         assert "Approved 1 MCP server(s): posthog" in result.output
 
+    def test_ci_skips_mcp_prompts(self, _setup, tmp_path: Path) -> None:
+        """--ci skips MCP prompts without allowing any servers."""
+        runner = CliRunner()
+        result = runner.invoke(init_cmd, ["--ci"])
+
+        assert result.exit_code == 0
+        assert "MCP servers detected" in result.output
+        assert "Approved" not in result.output
+        assert "not allowed (CI mode)" in result.output
+        # No interactive prompts should appear.
+        assert "Allow all" not in result.output
+        assert "Allow posthog?" not in result.output
+
+    def test_ci_with_allow_mcp(self, _setup, tmp_path: Path) -> None:
+        """--ci --allow-mcp auto-allows all MCP servers without prompts."""
+        runner = CliRunner()
+        result = runner.invoke(init_cmd, ["--ci", "--allow-mcp"])
+
+        assert result.exit_code == 0
+        assert "Approved 2 MCP server(s)" in result.output
+        assert "Allow all" not in result.output
+
     def test_no_mcp_servers_no_output(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

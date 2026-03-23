@@ -39,7 +39,19 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     default=False,
     help="Auto-allow all discovered MCP servers without prompting.",
 )
-def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) -> None:
+@click.option(
+    "--ci",
+    is_flag=True,
+    default=False,
+    help="Non-interactive mode for CI/CD pipelines. Skips all prompts. "
+    "MCP servers are not allowed unless --allow-mcp is also set.",
+)
+def init_cmd(
+    server_url: str | None,
+    policy_dir: str | None,
+    allow_mcp: bool,
+    ci: bool,
+) -> None:
     """Detect installed AI tools and generate Vectimus hook configurations."""
     click.echo("Vectimus init\n")
 
@@ -127,9 +139,13 @@ def init_cmd(server_url: str | None, policy_dir: str | None, allow_mcp: bool) ->
     # -- MCP server discovery -----------------------------------------------
     discovered = discover_mcp_servers(report)
     if discovered:
-        approved = _prompt_mcp_servers(discovered, config, allow_mcp)
+        approved = _prompt_mcp_servers(discovered, config, allow_mcp=allow_mcp, ci=ci)
         if approved:
             click.echo(f"\nApproved {len(approved)} MCP server(s): {', '.join(sorted(approved))}")
+        elif ci and not allow_mcp:
+            click.echo(
+                "\nMCP servers discovered but not allowed (CI mode). Use --allow-mcp to allow."
+            )
 
     click.echo(f"\nConfigured {len(tools_configured)} tool(s).")
     if server_url:
@@ -359,11 +375,14 @@ def _configure_gemini_cli() -> None:
 def _prompt_mcp_servers(
     discovered: dict[ToolName, list[str]],
     config: VectimusConfig,
-    allow_all: bool,
+    *,
+    allow_mcp: bool = False,
+    ci: bool = False,
 ) -> list[str]:
-    """Prompt user to approve discovered MCP servers (or auto-allow with --allow-mcp).
+    """Prompt user to approve discovered MCP servers.
 
-    Returns the list of server names that were approved.
+    In CI mode, MCP servers are skipped (not allowed) unless ``--allow-mcp``
+    is also set.  Returns the list of server names that were approved.
     """
     display_names = {
         ToolName.CLAUDE_CODE: "Claude Code",
@@ -381,10 +400,14 @@ def _prompt_mcp_servers(
         label = display_names.get(tool_name, tool_name.value)
         click.echo(f"  {label + ':':<16}{', '.join(servers)}")
 
-    if allow_all:
+    if allow_mcp:
         for server in all_servers:
             config.mcp_allow_server(server)
         return all_servers
+
+    # In CI mode without --allow-mcp, skip all prompts and allow nothing.
+    if ci:
+        return []
 
     # Interactive: ask to allow all, then per-server if declined.
     if click.confirm(f"\nAllow all {total} servers?", default=False):
