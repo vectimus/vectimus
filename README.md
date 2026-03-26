@@ -18,23 +18,11 @@ pipx install vectimus
 vectimus init
 ```
 
-That's it. Cedar policies evaluate every tool call — whether from a coding agent in your terminal or a framework agent in production. Dangerous commands, secret access, infrastructure changes and supply chain attacks blocked before execution.
-
-## Why this exists
-
-AI coding agents and agentic frameworks run shell commands, write files, install packages and call APIs. Without a policy layer, nothing stands between a prompt injection and `rm -rf /`.
-
-These are not hypothetical risks:
-
-- **[Clinejection](https://snyk.io/blog/cline-supply-chain-attack-prompt-injection-github-actions/) (Feb 2026)** — A prompt injection in a GitHub issue title caused an AI agent to publish backdoored npm packages. 4,000 developer machines compromised in 8 hours.
-- **[Terraform destroy incident](https://www.huuphan.com/2026/03/claude-code-wiped-production-database-terraform.html) (Feb 2026)** — An AI agent unpacked old Terraform configs and ran `terraform destroy`, wiping a production VPC, RDS database and ECS cluster.
-- **[IDEsaster](https://thehackernews.com/2025/12/researchers-uncover-30-flaws-in-ai.html) (Dec 2025)** — Researchers found 30+ vulnerabilities across Cursor, Windsurf and GitHub Copilot. 24 CVEs assigned.
-
-Vectimus is a defense-in-depth layer. Whatever permission setup your team uses, Vectimus adds deterministic policy evaluation underneath. Same input, same decision, every time.
+That's it.  Cedar policies evaluate every tool call - whether from a coding agent in your terminal or a framework agent in production.  Dangerous commands, secret access, infrastructure changes and supply chain attacks blocked before execution.
 
 ## What it catches
 
-Every policy references the real-world incident that motivated it. No "best practice" filler.
+Every policy references the real-world incident that motivated it.  No "best practice" filler.
 
 | Pack | What it blocks | Example |
 |------|---------------|---------|
@@ -50,9 +38,22 @@ Every policy references the real-world incident that motivated it. No "best prac
 | **MCP Safety** | Unapproved MCP servers, dangerous tool parameters | MCP server supply chain |
 | **Agent Governance** | Unchecked agent spawning, goal hijacking, rogue agents | Multi-agent control |
 
-11 packs. [Browse all policies →](https://vectimus.com/policies)
+11 packs.  [Browse all policies →](https://vectimus.com/policies)
 
-Maps to [OWASP Agentic Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (all 10 categories), SOC 2, NIST AI RMF, NIST CSF 2.0, ISO 27001 and EU AI Act. [Full compliance mappings →](https://vectimus.com/docs/compliance)
+Maps to [OWASP Agentic Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (all 10 categories), SOC 2, NIST AI RMF, NIST CSF 2.0, ISO 27001 and EU AI Act.  [Full compliance mappings →](https://vectimus.com/docs/compliance)
+
+## Why this exists
+
+AI coding agents and agentic frameworks run shell commands, write files, install packages and call APIs.  Without a governance layer, every agent you deploy is an unmonitored service account with production access and no audit trail.
+
+These are not hypothetical risks:
+
+- **[Clinejection](https://snyk.io/blog/cline-supply-chain-attack-prompt-injection-github-actions/) (Feb 2026)** - A prompt injection in a GitHub issue title caused an AI agent to publish backdoored npm packages.  4,000 developer machines compromised in 8 hours.
+- **[Terraform destroy incident](https://www.huuphan.com/2026/03/claude-code-wiped-production-database-terraform.html) (Feb 2026)** - An AI agent unpacked old Terraform configs and ran `terraform destroy`, wiping a production VPC, RDS database and ECS cluster.
+- **[IDEsaster](https://thehackernews.com/2025/12/researchers-uncover-30-flaws-in-ai.html) (Dec 2025)** - Researchers found 30+ vulnerabilities across Cursor, Windsurf and GitHub Copilot.  24 CVEs assigned.
+- **[Trivy/LiteLLM cascade](https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack) (Mar 2026)** - Compromised security scanner cascaded credentials to LiteLLM (3.4M daily PyPI downloads).  5 ecosystems affected, 36% of cloud environments impacted.
+
+Vectimus is a defense-in-depth layer.  Whatever permission setup your team uses, Vectimus adds deterministic policy evaluation underneath.  Same input, same decision, every time.
 
 ## Example policy
 
@@ -107,7 +108,7 @@ The entire pipeline is governed by Vectimus itself. The agents that write govern
 |:---------:|:----------:|:----------------:|
 | ✅ | ✅ | ✅ |
 
-Same Cedar policies govern both. One install.
+Same Cedar policies govern both.  One install.  Works on macOS, Linux and Windows.
 
 <details>
 <summary><strong>LangGraph / LangChain integration</strong></summary>
@@ -211,7 +212,9 @@ agent = LlmAgent(
 - **Audit Log** records every decision with full context for compliance evidence and incident investigation
 - **Signed Receipt** every evaluation produces an Ed25519-signed JSON receipt. Tamper-evident, offline-verifiable with `vectimus verify`
 
-Evaluation is entirely local. Zero telemetry. The only network call is a background policy update check every 24 hours (disable with `vectimus policy auto-update off`). [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
+The governance logic sits outside the model entirely.  It cannot be influenced by prompt injection, model reasoning or context-window manipulation.  Hook-layer enforcement, not instructions the agent can choose to ignore.
+
+Evaluation is entirely local.  Zero telemetry.  The only network call is a background policy update check every 24 hours (disable with `vectimus policy auto-update off`).  [Cedar](https://www.cedarpolicy.com/) is the same policy language used by [AWS AgentCore Policy](https://aws.amazon.com/bedrock/agentcore/) and [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/).
 
 ## MCP server governance
 
