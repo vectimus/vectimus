@@ -200,10 +200,10 @@ agent = LlmAgent(
                            │
                      ┌─────┴─────┐
                      ▼           ▼
-              ┌──────────┐ ┌─────────────┐
+              ┌──────────┐ ┌──────────────┐
               │Audit Log │ │Signed Receipt│
-              │ (JSONL)  │ │ (Ed25519)   │
-              └──────────┘ └─────────────┘
+              │ (JSONL)  │ │ (Ed25519)    │
+              └──────────┘ └──────────────┘
 ```
 
 - **Vectimus** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
