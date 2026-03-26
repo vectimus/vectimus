@@ -193,8 +193,8 @@ agent = LlmAgent(
 
 ```
 ┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────┐
-│  AI Agent   │────▶│   Vectimus    │────▶│ Cedar Policy │────▶│ allow /  │
-│ (tool call) │     │  Normaliser   │     │   Engine     │     │ deny /   │
+│  AI Agent   │────▶│               │────▶│ Cedar Policy │────▶│ allow /  │
+│ (tool call) │     │   Vectimus    │     │   Engine     │     │ deny /   │
 │             │◀────│               │◀────│              │◀────│ escalate │
 └─────────────┘     └───────────────┘     └──────────────┘     └──────────┘
                            │
@@ -206,7 +206,7 @@ agent = LlmAgent(
               └──────────┘ └─────────────┘
 ```
 
-- **Normaliser** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
+- **Vectimus** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
 - **Cedar Engine** evaluates all loaded policies deterministically. No LLM in the loop. Same input, same decision.
 - **Audit Log** records every decision with full context for compliance evidence and incident investigation
 - **Signed Receipt** every evaluation produces an Ed25519-signed JSON receipt. Tamper-evident, offline-verifiable with `vectimus verify`
