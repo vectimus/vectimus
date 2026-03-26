@@ -293,7 +293,7 @@ Strips Vectimus hooks from all detected tools in the current project. Preserves 
 
 ## Documentation
 
-Full docs at [vectimus.com/docs](https://vectimus.com/docs):
+Full docs at [vectimus.com/docs](https://vectimus.com/docs/getting-started):
 
 - [Getting started](https://vectimus.com/docs/getting-started)
 - [Writing policies](https://vectimus.com/docs/writing-policies)
