@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-03-28
+
 ### Added
 
 - Temporary rule disabling with `vectimus rule disable <rule_id> --for <duration>`: disables a rule for a specified duration (e.g. `30m`, `2h`, `1h30m`) without writing to disk. Lives in daemon memory only and reverts automatically on expiry or daemon restart. Auto-starts daemon if not running.
