@@ -8,6 +8,7 @@ daemon is unavailable so the caller can use inline evaluation instead.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -18,6 +19,8 @@ from vectimus.engine.daemon_info import _IS_WINDOWS, is_daemon_alive, read_daemo
 
 if not _IS_WINDOWS:
     from vectimus.engine.daemon_info import SOCKET_PATH
+
+_log = logging.getLogger(__name__)
 
 # Timeout for the entire round-trip (connect + send + recv).
 _SOCKET_TIMEOUT = 2.0
@@ -77,6 +80,7 @@ def _send_request_unix(source: str, payload: dict, cwd: str) -> dict | None:
 
         return json.loads(data.decode())
     except Exception:
+        _log.debug("Unix socket request to daemon failed", exc_info=True)
         return None
 
 
@@ -114,6 +118,7 @@ def _send_request_tcp(source: str, payload: dict, cwd: str, info: dict) -> dict 
 
         return json.loads(data.decode())
     except Exception:
+        _log.debug("TCP request to daemon failed", exc_info=True)
         return None
 
 
@@ -186,7 +191,7 @@ def _send_control_message(message: dict, *, auto_start: bool = False) -> dict | 
         if data.strip():
             return json.loads(data.decode())
     except Exception:
-        pass
+        _log.debug("Control message to daemon failed", exc_info=True)
     return None
 
 
@@ -224,7 +229,7 @@ def daemon_reload() -> bool:
             resp = json.loads(data.decode())
             return resp.get("status") == "reloaded"
     except Exception:
-        pass
+        _log.debug("Daemon reload request failed", exc_info=True)
     return False
 
 

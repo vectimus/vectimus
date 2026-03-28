@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import click
 
 from vectimus.engine.loader import PolicyLoader
+
+_log = logging.getLogger(__name__)
 
 
 def _parse_duration(value: str) -> float:
@@ -52,7 +55,7 @@ def _notify_daemon_reload() -> None:
         if daemon_reload():
             click.echo("Daemon reloaded.")
     except Exception:
-        pass
+        _log.debug("Failed to notify daemon for reload", exc_info=True)
 
 
 @click.group("rule")
@@ -89,7 +92,7 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
             for entry in resp.get("temp_disables", []):
                 temp_disable_map[entry["rule_id"]] = entry["remaining_s"]
     except Exception:
-        pass
+        _log.debug("Failed to query temp disables from daemon", exc_info=True)
 
     click.echo(f"{'ID':<25} {'Pack':<15} {'Description':<40} {'Status':<22}")
     click.echo("-" * 105)
@@ -234,7 +237,7 @@ def rule_enable(
         if resp and resp.get("status") == "ok":
             click.echo(f"Temp disable for '{rule_id}' cleared.")
     except Exception:
-        pass
+        _log.debug("Failed to clear temp disable via daemon", exc_info=True)
 
     if is_global:
         loader.config.enable_rule(rule_id)
