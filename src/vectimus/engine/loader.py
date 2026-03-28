@@ -242,6 +242,7 @@ class PolicyLoader:
         config_path: str | None = None,
         project_path: Path | None = None,
         mcp_allowed_override: list[str] | None = None,
+        extra_disabled_rules: set[str] | None = None,
     ) -> None:
         """Initialise with policy directories and optional config path.
 
@@ -252,6 +253,9 @@ class PolicyLoader:
         mcp_allowed_override: if provided, used as the MCP allowlist instead
             of reading from VectimusConfig.  Used by the server to pass its
             own MCP configuration through.
+        extra_disabled_rules: additional rule IDs to treat as disabled.
+            Used by the daemon to inject temporary disables without
+            writing to disk.
         """
         if policy_dirs is None:
             # Bundled policies always load as the baseline.
@@ -277,6 +281,7 @@ class PolicyLoader:
         self._config = VectimusConfig(config_path)
         self._project_path = project_path
         self._mcp_allowed_override = mcp_allowed_override
+        self._extra_disabled_rules = extra_disabled_rules or set()
         self._packs: list[PackInfo] = []
         self._rules: list[RuleInfo] = []
         self._loaded = False
@@ -341,7 +346,9 @@ class PolicyLoader:
                 if missing:
                     logger.warning("pack_missing_dependency", pack=pack.name, missing=missing)
 
-        disabled_rules = self._config.effective_disabled_rules(self._project_path)
+        disabled_rules = (
+            self._config.effective_disabled_rules(self._project_path) | self._extra_disabled_rules
+        )
         if self._mcp_allowed_override is not None:
             mcp_allowlist = self._mcp_allowed_override
         else:

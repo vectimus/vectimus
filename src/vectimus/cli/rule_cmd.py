@@ -2,11 +2,49 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 import click
 
 from vectimus.engine.loader import PolicyLoader
+
+_log = logging.getLogger(__name__)
+
+
+def _parse_duration(value: str) -> float:
+    """Parse a human-friendly duration string into seconds.
+
+    Accepts formats like ``30s``, ``5m``, ``2h``, ``1h30m``, ``90m``.
+    Raises ``click.BadParameter`` on invalid input.
+    """
+    value = value.strip().lower()
+    pattern = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$")
+    m = pattern.match(value)
+    if not m or not any(m.groups()):
+        raise click.BadParameter(
+            f"Invalid duration '{value}'. Use formats like 30s, 5m, 2h, 1h30m."
+        )
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0)
+    seconds = int(m.group(3) or 0)
+    total = hours * 3600 + minutes * 60 + seconds
+    if total <= 0:
+        raise click.BadParameter("Duration must be greater than zero.")
+    return float(total)
+
+
+def _format_remaining(seconds: float) -> str:
+    """Format remaining seconds as a human-readable string like ``24m`` or ``1h30m``."""
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    hours, remainder = divmod(total, 3600)
+    minutes = remainder // 60
+    if hours > 0:
+        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+    return f"{minutes}m"
 
 
 def _notify_daemon_reload() -> None:
@@ -17,7 +55,7 @@ def _notify_daemon_reload() -> None:
         if daemon_reload():
             click.echo("Daemon reloaded.")
     except Exception:
-        pass
+        _log.debug("Failed to notify daemon for reload", exc_info=True)
 
 
 @click.group("rule")
@@ -44,6 +82,18 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
     global_disabled = set(loader.config.disabled_rules())
     enforcement_overrides = loader.config.effective_enforcement_overrides(project_path)
 
+    # Query daemon for active temp disables.
+    temp_disable_map: dict[str, float] = {}  # rule_id -> remaining_s
+    try:
+        from vectimus.cli.daemon_client import daemon_query_temp_disables
+
+        resp = daemon_query_temp_disables(project=str(project_path.resolve()))
+        if resp and resp.get("status") == "ok":
+            for entry in resp.get("temp_disables", []):
+                temp_disable_map[entry["rule_id"]] = entry["remaining_s"]
+    except Exception:
+        _log.debug("Failed to query temp disables from daemon", exc_info=True)
+
     click.echo(f"{'ID':<25} {'Pack':<15} {'Description':<40} {'Status':<22}")
     click.echo("-" * 105)
 
@@ -53,7 +103,10 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
             desc = desc[:35] + "..."
 
         rid = r["rule_id"]
-        if rid in global_disabled:
+        if rid in temp_disable_map:
+            remaining = temp_disable_map[rid]
+            status = f"temp ({_format_remaining(remaining)})"
+        elif rid in global_disabled:
             status = "disabled (global)"
         elif rid in project_disabled:
             status = "disabled (project)"
@@ -78,16 +131,25 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
 @click.option(
     "--global", "is_global", is_flag=True, help="Disable the rule globally instead of per-project."
 )
+@click.option(
+    "--for",
+    "duration",
+    default=None,
+    help="Temporarily disable for a duration (e.g. 30m, 2h, 1h30m). "
+    "Lives in daemon memory only -- reverts automatically.",
+)
 def rule_disable(
     rule_id: str,
     config_path: str | None,
     policy_dir: str | None,
     is_global: bool,
+    duration: str | None,
 ) -> None:
     """Disable a specific rule by ID.
 
     Without --global, disables the rule for the current project only.
     With --global, disables the rule in the global config.
+    With --for, temporarily disables via the daemon (no disk write).
     """
     dirs = [policy_dir] if policy_dir else None
     loader = PolicyLoader(policy_dirs=dirs, config_path=config_path, project_path=Path.cwd())
@@ -96,6 +158,31 @@ def rule_disable(
     if rule is None:
         click.echo(f"Rule '{rule_id}' not found.", err=True)
         raise SystemExit(1)
+
+    # Temporary disable via daemon.
+    if duration is not None:
+        if is_global:
+            click.echo(
+                "--for cannot be used with --global. Temp disables are per-project.", err=True
+            )
+            raise SystemExit(1)
+
+        duration_s = _parse_duration(duration)
+        project_path = str(Path.cwd().resolve())
+
+        from vectimus.cli.daemon_client import daemon_temp_disable
+
+        resp = daemon_temp_disable(rule_id, project_path, duration_s)
+        if resp is None:
+            click.echo("Failed to reach daemon. Could not set temp disable.", err=True)
+            raise SystemExit(1)
+        if resp.get("status") != "ok":
+            click.echo(f"Daemon error: {resp.get('reason', 'unknown')}", err=True)
+            raise SystemExit(1)
+
+        click.echo(f"Rule '{rule_id}' temporarily disabled for {duration}.")
+        click.echo("This disable lives in daemon memory and reverts automatically.")
+        return
 
     if is_global:
         loader.config.disable_rule(rule_id)
@@ -141,6 +228,16 @@ def rule_enable(
     if rule is None:
         click.echo(f"Rule '{rule_id}' not found.", err=True)
         raise SystemExit(1)
+
+    # Also clear any temp disable for this rule.
+    try:
+        from vectimus.cli.daemon_client import daemon_clear_temp_disable
+
+        resp = daemon_clear_temp_disable(rule_id, str(Path.cwd().resolve()))
+        if resp and resp.get("status") == "ok":
+            click.echo(f"Temp disable for '{rule_id}' cleared.")
+    except Exception:
+        _log.debug("Failed to clear temp disable via daemon", exc_info=True)
 
     if is_global:
         loader.config.enable_rule(rule_id)
