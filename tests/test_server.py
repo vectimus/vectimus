@@ -948,7 +948,7 @@ class TestServerConfigExtensions:
         assert config.api_keys == []
 
     def test_resolve_api_keys_single(self) -> None:
-        config = ServerConfig(api_key="my-secret")
+        config = ServerConfig(api_key="my-secret")  # Snyk: test fixture, not a real secret
         lookup = config.resolve_api_keys()
         assert lookup == {"my-secret": "default"}
 
@@ -969,7 +969,7 @@ class TestServerConfigExtensions:
         from vectimus.server.config import ApiKeyEntry
 
         config = ServerConfig(
-            api_key="legacy-key",
+            api_key="legacy-key",  # Snyk: test fixture, not a real secret
             api_keys=[ApiKeyEntry(name="new-team", key="new-key")],
         )
         lookup = config.resolve_api_keys()
