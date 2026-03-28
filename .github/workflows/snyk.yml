@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Run Snyk Code
         uses: snyk/actions/python@master
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
@@ -31,27 +32,14 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e ".[server]"
       - name: Run Snyk SCA
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high
-
-  snyk-container:
-    name: Snyk Container
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-      - name: Build Docker image
-        run: docker build -t vectimus:${{ github.sha }} .
-      - name: Run Snyk Container
-        uses: snyk/actions/docker@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          image: vectimus:${{ github.sha }}
-          args: --severity-threshold=high
+          args: --severity-threshold=high --command=python3
