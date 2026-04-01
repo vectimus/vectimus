@@ -26,7 +26,7 @@ jobs:
           vectimus init --ci
 
       - name: Run Claude Issue Triage
-        uses: anthropics/claude-code-action@v1.0.77
+        uses: anthropics/claude-code-action@v1.0.83
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
