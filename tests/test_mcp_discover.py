@@ -147,6 +147,44 @@ class TestDiscoverMcpServers:
         result = discover_mcp_servers(_make_report(ToolName.COPILOT))
         assert result == {ToolName.COPILOT: ["copilot-mcp"]}
 
+    def test_codex_servers_from_user_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        config = tmp_path / ".codex" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+[mcp_servers.github]
+command = "github-mcp"
+
+[mcp_servers.slack]
+command = "slack-mcp"
+enabled = false
+"""
+        )
+
+        result = discover_mcp_servers(_make_report(ToolName.CODEX))
+        assert result == {ToolName.CODEX: ["github"]}
+
+    def test_codex_servers_from_project_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        project = tmp_path / "repo"
+        project.mkdir()
+        config = project / ".codex" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+[mcp_servers.linear]
+transport = "stdio"
+"""
+        )
+
+        result = discover_mcp_servers(_make_report(ToolName.CODEX), project_dir=project)
+        assert result == {ToolName.CODEX: ["linear"]}
+
     def test_multiple_tools(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
 

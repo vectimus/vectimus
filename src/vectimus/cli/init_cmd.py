@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import json
 import shutil
+import tomllib
 from pathlib import Path
 
 import click
+import tomli_w
 
-from vectimus.cli.detect import ToolName, detect_all
+from vectimus.cli.detect import (
+    TOOL_DISPLAY_NAMES,
+    ToolName,
+    detect_all,
+    tool_runtime_supported,
+)
 from vectimus.cli.mcp_discover import discover_mcp_servers
 from vectimus.engine.config import VectimusConfig
 from vectimus.engine.loader import PolicyLoader
@@ -19,6 +26,7 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     ToolName.CURSOR: ("Cursor", "_configure_cursor"),
     ToolName.COPILOT: ("VS Code / Copilot", "_configure_copilot"),
     ToolName.GEMINI_CLI: ("Gemini CLI", "_configure_gemini_cli"),
+    ToolName.CODEX: ("Codex CLI", "_configure_codex_cli"),
 }
 
 
@@ -54,12 +62,12 @@ def init_cmd(
 ) -> None:
     """Detect installed AI tools and generate Vectimus hook configurations."""
     click.echo("Vectimus init\n")
-
     configure_fns = {
         ToolName.CLAUDE_CODE: _configure_claude_code,
         ToolName.CURSOR: _configure_cursor,
         ToolName.COPILOT: _configure_copilot,
         ToolName.GEMINI_CLI: _configure_gemini_cli,
+        ToolName.CODEX: _configure_codex_cli,
     }
 
     report = detect_all()
@@ -67,10 +75,16 @@ def init_cmd(
 
     click.echo("Tool detection:")
     for tool_name in ToolName:
-        display_name = _TOOL_CONFIG[tool_name][0]
+        display_name, _ = _TOOL_CONFIG[tool_name]
         result = report.results.get(tool_name)
 
         if result and result.found:
+            supported, reason = tool_runtime_supported(tool_name)
+            if not supported:
+                click.echo(f"  [ ] {display_name:<18} found but {reason}")
+                if result.executable_path:
+                    click.echo(f"      {result.executable_path}")
+                continue
             configure_fns[tool_name]()
             tools_configured.append(tool_name.value)
             method_label = f"({result.method.value})" if result.method else ""
@@ -200,6 +214,11 @@ def _vectimus_cmd() -> str:
         return shlex.quote(found)
 
     return f"{shlex.quote(sys.executable)} -m vectimus.cli.main"
+
+
+def _command_references_vectimus_source(command: str, source: str) -> bool:
+    """Return whether *command* invokes Vectimus for the given source."""
+    return "vectimus" in command and f"--source {source}" in command
 
 
 def _is_vectimus_hook(hook: dict) -> bool:
@@ -372,6 +391,130 @@ def _configure_gemini_cli() -> None:
         raise SystemExit(1)
 
 
+def _is_vectimus_codex_hook(hook: dict) -> bool:
+    """Check if a Codex hook definition was created by Vectimus."""
+    return (
+        hook.get("type") == "command"
+        and _command_references_vectimus_source(hook.get("command", ""), "codex")
+    )
+
+
+def _is_vectimus_codex_entry(entry: dict) -> bool:
+    """Check if a Codex hook matcher entry contains a Vectimus Codex hook."""
+    hooks = entry.get("hooks", [])
+    if not isinstance(hooks, list):
+        return False
+    return any(_is_vectimus_codex_hook(hook) for hook in hooks if isinstance(hook, dict))
+
+
+def _has_global_codex_vectimus_hook() -> bool:
+    """Return whether the user-level Codex hooks file already contains Vectimus."""
+    hooks_path = Path.home() / ".codex" / "hooks.json"
+    if not hooks_path.exists():
+        return False
+    try:
+        data = json.loads(hooks_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    entries = data.get("hooks", {}).get("PreToolUse", [])
+    return any(_is_vectimus_codex_entry(entry) for entry in entries if isinstance(entry, dict))
+
+
+def _enable_codex_hooks_feature(config_path: Path) -> bool:
+    """Ensure ``[features].codex_hooks = true`` in the repo-local Codex config.
+
+    Returns ``True`` when the file is updated or already enabled. Returns
+    ``False`` when the existing file is invalid TOML and must be fixed
+    manually.
+    """
+    data: dict = {}
+    if config_path.exists():
+        try:
+            with open(config_path, "rb") as f:
+                loaded = tomllib.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+        except tomllib.TOMLDecodeError:
+            click.echo(
+                f"  Warning: {config_path} is invalid TOML. "
+                "Set [features].codex_hooks = true manually.",
+                err=True,
+            )
+            return False
+        except OSError as exc:
+            click.echo(f"  Error reading {config_path}: {exc}", err=True)
+            raise SystemExit(1)
+
+    features = data.get("features")
+    if not isinstance(features, dict):
+        features = {}
+        data["features"] = features
+    features["codex_hooks"] = True
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(config_path, "wb") as f:
+            tomli_w.dump(data, f)
+    except OSError as exc:
+        click.echo(f"  Error writing {config_path}: {exc}", err=True)
+        raise SystemExit(1)
+    return True
+
+
+def _configure_codex_cli() -> None:
+    """Write repo-local Codex hooks and feature flag config."""
+    config_dir = Path(".codex")
+    config_dir.mkdir(exist_ok=True)
+    hooks_path = config_dir / "hooks.json"
+    config_path = config_dir / "config.toml"
+
+    vectimus_hook = {
+        "type": "command",
+        "command": f"{_vectimus_cmd()} hook --source codex",
+        "statusMessage": "Vectimus policy check",
+    }
+
+    hooks_data: dict = {}
+    if hooks_path.exists():
+        try:
+            hooks_data = json.loads(hooks_path.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    hooks_data.setdefault("hooks", {})
+    existing_entries = hooks_data["hooks"].get("PreToolUse", [])
+
+    merged: list[dict] = [{"matcher": "Bash", "hooks": [vectimus_hook]}]
+    for entry in existing_entries:
+        hooks_list = entry.get("hooks", [])
+        if not isinstance(hooks_list, list):
+            merged.append(entry)
+            continue
+        non_vectimus = [
+            hook
+            for hook in hooks_list
+            if isinstance(hook, dict) and not _is_vectimus_codex_hook(hook)
+        ]
+        if non_vectimus:
+            merged.append({**entry, "hooks": non_vectimus})
+
+    hooks_data["hooks"]["PreToolUse"] = merged
+
+    try:
+        hooks_path.write_text(json.dumps(hooks_data, indent=2) + "\n")
+    except OSError as exc:
+        click.echo(f"  Error writing {hooks_path}: {exc}", err=True)
+        raise SystemExit(1)
+
+    if _has_global_codex_vectimus_hook():
+        click.echo(
+            "      Warning: ~/.codex/hooks.json already contains a Vectimus Codex hook. "
+            "Codex runs matching user and repo hooks together."
+        )
+
+    _enable_codex_hooks_feature(config_path)
+
+
 def _prompt_mcp_servers(
     discovered: dict[ToolName, list[str]],
     config: VectimusConfig,
@@ -384,20 +527,13 @@ def _prompt_mcp_servers(
     In CI mode, MCP servers are skipped (not allowed) unless ``--allow-mcp``
     is also set.  Returns the list of server names that were approved.
     """
-    display_names = {
-        ToolName.CLAUDE_CODE: "Claude Code",
-        ToolName.CURSOR: "Cursor",
-        ToolName.COPILOT: "VS Code",
-        ToolName.GEMINI_CLI: "Gemini CLI",
-    }
-
     # Deduplicate across tools while preserving per-tool display.
     all_servers = sorted({s for servers in discovered.values() for s in servers})
     total = len(all_servers)
 
     click.echo("\nMCP servers detected:")
     for tool_name, servers in discovered.items():
-        label = display_names.get(tool_name, tool_name.value)
+        label = TOOL_DISPLAY_NAMES.get(tool_name, tool_name.value)
         click.echo(f"  {label + ':':<16}{', '.join(servers)}")
 
     if allow_mcp:

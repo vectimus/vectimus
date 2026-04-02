@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 
+from vectimus.cli.detect import TOOL_DISPLAY_NAMES, ToolName, tool_runtime_supported
+from vectimus.cli.init_cmd import _command_references_vectimus_source, _is_vectimus_hook
 from vectimus.engine.config import VectimusConfig, project_local_config_path
 from vectimus.engine.loader import PolicyLoader
 
@@ -19,9 +22,13 @@ def _check_claude_code() -> str | None:
         return None
     try:
         data = json.loads(path.read_text())
-        hooks = data.get("hooks", {})
-        if hooks.get("PreToolUse"):
-            return str(path)
+        entries = data.get("hooks", {}).get("PreToolUse", [])
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks", []):
+                if isinstance(hook, dict) and _is_vectimus_hook(hook):
+                    return str(path)
     except (json.JSONDecodeError, OSError):
         pass
     return None
@@ -36,10 +43,12 @@ def _check_cursor() -> str | None:
         data = json.loads(path.read_text())
         # New format: {"hooks": {"preToolUse": [...]}}
         hooks = data.get("hooks", {})
-        if hooks.get("preToolUse") or hooks.get("beforeShellExecution"):
-            return str(path)
+        for hook_type in ("preToolUse", "beforeShellExecution"):
+            for entry in hooks.get(hook_type, []):
+                if isinstance(entry, dict) and "vectimus" in entry.get("command", ""):
+                    return str(path)
         # Legacy flat format: {"beforeShellExecution": {...}}
-        if data.get("beforeShellExecution"):
+        if "vectimus" in data.get("beforeShellExecution", {}).get("command", ""):
             return str(path)
     except (json.JSONDecodeError, OSError):
         pass
@@ -55,14 +64,94 @@ def _check_copilot() -> str | None:
         data = json.loads(path.read_text())
         # New format: {"hooks": {"PreToolUse": [...]}}
         hooks = data.get("hooks", {})
-        if hooks.get("PreToolUse"):
-            return str(path)
+        for hook in hooks.get("PreToolUse", []):
+            if isinstance(hook, dict) and _is_vectimus_hook(hook):
+                return str(path)
         # Legacy flat format: {"PreToolUse": {...}}
-        if data.get("PreToolUse"):
+        legacy = data.get("PreToolUse", {})
+        if isinstance(legacy, dict) and _is_vectimus_hook(legacy):
             return str(path)
     except (json.JSONDecodeError, OSError):
         pass
     return None
+
+
+def _check_gemini_cli() -> str | None:
+    """Return config path if Gemini CLI hooks point at Vectimus."""
+    path = Path(".gemini") / "settings.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        entries = data.get("hooks", {}).get("BeforeTool", [])
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks", []):
+                if isinstance(hook, dict) and _command_references_vectimus_source(
+                    hook.get("command", ""), "gemini-cli"
+                ):
+                    return str(path)
+            if _command_references_vectimus_source(entry.get("command", ""), "gemini-cli"):
+                return str(path)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _read_codex_feature_setting(path: Path) -> bool | None:
+    """Return the explicit Codex hooks flag from a TOML file if present."""
+    if not path.exists():
+        return None
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (tomllib.TOMLDecodeError, OSError):
+        return None
+    features = data.get("features")
+    if not isinstance(features, dict):
+        return None
+    value = features.get("codex_hooks")
+    return value if isinstance(value, bool) else None
+
+
+def _codex_hooks_enabled() -> bool:
+    """Return whether Codex hooks are enabled for this project."""
+    project_value = _read_codex_feature_setting(Path(".codex") / "config.toml")
+    if project_value is not None:
+        return project_value
+    user_value = _read_codex_feature_setting(Path.home() / ".codex" / "config.toml")
+    return user_value is True
+
+
+def _check_codex() -> str | None:
+    """Return config path if repo-local Codex hooks point at Vectimus."""
+    path = Path(".codex") / "hooks.json"
+    if not path.exists() or not _codex_hooks_enabled():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        entries = data.get("hooks", {}).get("PreToolUse", [])
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks", []):
+                if isinstance(hook, dict) and _command_references_vectimus_source(
+                    hook.get("command", ""), "codex"
+                ):
+                    return str(path)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+_STATUS_CHECKS = {
+    ToolName.CLAUDE_CODE: _check_claude_code,
+    ToolName.CURSOR: _check_cursor,
+    ToolName.COPILOT: _check_copilot,
+    ToolName.GEMINI_CLI: _check_gemini_cli,
+    ToolName.CODEX: _check_codex,
+}
 
 
 def _read_audit_stats(log_dir: Path) -> dict[str, int | str]:
@@ -131,28 +220,21 @@ def status_cmd(log_dir: str | None) -> None:
     click.echo("Tool configurations:")
     tools_configured = 0
 
-    claude_path = _check_claude_code()
-    if claude_path:
-        click.echo(f"  [+] Claude Code  {claude_path}")
-        tools_configured += 1
-    else:
-        click.echo("  [ ] Claude Code  not configured")
+    for tool_name in ToolName:
+        label = TOOL_DISPLAY_NAMES[tool_name]
+        supported, reason = tool_runtime_supported(tool_name)
+        if not supported:
+            click.echo(f"  [ ] {label:<22} unsupported: {reason}")
+            continue
 
-    cursor_path = _check_cursor()
-    if cursor_path:
-        click.echo(f"  [+] Cursor       {cursor_path}")
-        tools_configured += 1
-    else:
-        click.echo("  [ ] Cursor       not configured")
+        configured_path = _STATUS_CHECKS[tool_name]()
+        if configured_path:
+            click.echo(f"  [+] {label:<22} {configured_path}")
+            tools_configured += 1
+        else:
+            click.echo(f"  [ ] {label:<22} not configured")
 
-    copilot_path = _check_copilot()
-    if copilot_path:
-        click.echo(f"  [+] Copilot      {copilot_path}")
-        tools_configured += 1
-    else:
-        click.echo("  [ ] Copilot      not configured")
-
-    click.echo(f"\n  {tools_configured}/3 tools configured")
+    click.echo(f"\n  {tools_configured}/{len(_STATUS_CHECKS)} tools configured")
 
     # -- Project-local config -----------------------------------------------
     local_config = project_local_config_path(project_path)

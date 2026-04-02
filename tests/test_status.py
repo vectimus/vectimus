@@ -9,8 +9,10 @@ from click.testing import CliRunner
 
 from vectimus.cli.status_cmd import (
     _check_claude_code,
+    _check_codex,
     _check_copilot,
     _check_cursor,
+    _check_gemini_cli,
     _read_audit_stats,
     status_cmd,
 )
@@ -25,7 +27,17 @@ class TestToolDetection:
         config_dir.mkdir()
         settings = {
             "hooks": {
-                "PreToolUse": [{"matcher": "", "hooks": [{"type": "command"}]}],
+                "PreToolUse": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "vectimus hook --source claude-code",
+                            }
+                        ],
+                    }
+                ],
             },
         }
         (config_dir / "settings.json").write_text(json.dumps(settings))
@@ -59,6 +71,67 @@ class TestToolDetection:
     def test_copilot_not_configured(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
         assert _check_copilot() is None
+
+    def test_gemini_detected(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        config_dir = tmp_path / ".gemini"
+        config_dir.mkdir()
+        config = {
+            "hooks": {
+                "BeforeTool": [
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "vectimus hook --source gemini-cli"}
+                        ],
+                    }
+                ]
+            }
+        }
+        (config_dir / "settings.json").write_text(json.dumps(config))
+        assert _check_gemini_cli() is not None
+
+    def test_codex_detected_with_project_flag(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        config_dir = tmp_path / ".codex"
+        config_dir.mkdir()
+        hooks = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "vectimus hook --source codex"}],
+                    }
+                ]
+            }
+        }
+        (config_dir / "hooks.json").write_text(json.dumps(hooks))
+        (config_dir / "config.toml").write_text("[features]\ncodex_hooks = true\n")
+        assert _check_codex() is not None
+
+    def test_codex_detected_with_user_flag(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        user_codex = tmp_path / ".codex"
+        user_codex.mkdir()
+        (user_codex / "config.toml").write_text("[features]\ncodex_hooks = true\n")
+
+        project_codex = tmp_path / "project" / ".codex"
+        project_codex.mkdir(parents=True)
+        hooks = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "vectimus hook --source codex"}],
+                    }
+                ]
+            }
+        }
+        monkeypatch.chdir(tmp_path / "project")
+        (project_codex / "hooks.json").write_text(json.dumps(hooks))
+        assert _check_codex() is not None
 
 
 class TestAuditStats:
