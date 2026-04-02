@@ -13,6 +13,7 @@ from vectimus.cli.detect import (
     ToolName,
     _check_copilot_extension,
     _detect_claude_code,
+    _detect_codex_cli,
     _detect_cursor,
     _detect_vscode,
     detect_all,
@@ -208,11 +209,12 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
         report = detect_all()
-        assert len(report.results) == 4
+        assert len(report.results) == 5
         assert ToolName.CLAUDE_CODE in report.results
         assert ToolName.CURSOR in report.results
         assert ToolName.COPILOT in report.results
         assert ToolName.GEMINI_CLI in report.results
+        assert ToolName.CODEX in report.results
 
     def test_tools_found_property(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -236,7 +238,7 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
         report = detect_all()
-        assert len(report.tools_not_found) == 4
+        assert len(report.tools_not_found) == 5
 
     def test_platform_is_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(shutil, "which", lambda name: None)
@@ -285,3 +287,37 @@ class TestDetectionPerformance:
         detect_all()
         elapsed = time.perf_counter() - start
         assert elapsed < 2.0, f"Detection took {elapsed:.2f}s, budget is 2s"
+
+
+# ---------------------------------------------------------------------------
+# Codex CLI
+# ---------------------------------------------------------------------------
+
+
+class TestDetectCodexCLI:
+    """Codex CLI detection tests."""
+
+    def test_found_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            shutil, "which", lambda name: "/usr/local/bin/codex" if name == "codex" else None
+        )
+        result = _detect_codex_cli()
+        assert result.found is True
+        assert result.method == DetectionMethod.PATH
+        assert result.executable_path == "/usr/local/bin/codex"
+
+    def test_found_via_config_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        result = _detect_codex_cli()
+        assert result.found is True
+        assert result.method == DetectionMethod.CONFIG_DIR
+
+    def test_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        result = _detect_codex_cli()
+        assert result.found is False
+        assert result.method is None

@@ -546,6 +546,8 @@ class TestFileProtection:
             (".cursor/hooks.json", "vectimus-fileint-004"),
             (".cursor/mcp.json", "vectimus-fileint-004"),
             (".claude/mcp.json", "vectimus-fileint-004"),
+            (".codex/hooks.json", "vectimus-fileint-004"),
+            (".codex/config.toml", "vectimus-fileint-004"),
             (".vscode/settings.json", "vectimus-fileint-004"),
             (".vscode/tasks.json", "vectimus-fileint-004"),
             # .vectimus directory
@@ -664,6 +666,8 @@ class TestMCPGovernance:
             # Governance config
             (".claude/settings.json", "vectimus-mcp-007"),
             (".cursor/hooks.json", "vectimus-mcp-007"),
+            (".codex/hooks.json", "vectimus-mcp-007"),
+            (".codex/config.toml", "vectimus-mcp-007"),
             (".vectimus/config.toml", "vectimus-mcp-007"),
         ],
     )
@@ -679,7 +683,7 @@ class TestMCPGovernance:
         assert decision.decision == "deny"
         # Multiple rules may match; verify at least one expected rule is present
         # (mcp-001 default deny will always match too in test context)
-        assert decision.matched_policy_ids
+        assert expected_rule in decision.matched_policy_ids
 
     @pytest.mark.parametrize(
         "command",

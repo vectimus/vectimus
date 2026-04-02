@@ -5,4 +5,4 @@ tool-specific JSON payloads into canonical VectimusEvent objects.
 No external dependencies beyond the standard library and the Vectimus engine.
 """
 
-from vectimus.adapters import claude, copilot, cursor, gemini  # noqa: F401
+from vectimus.adapters import claude, codex, copilot, cursor, gemini  # noqa: F401

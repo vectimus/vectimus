@@ -4,7 +4,7 @@ Reads tool call JSON from stdin, evaluates against Cedar policies,
 returns a tool-specific deny payload via stdout.
 
 Exit codes:
-  0 = allow (no output) or deny (JSON with permissionDecision on stdout)
+  0 = allow (no output) or deny (JSON on stdout)
   2 = deny  (Cursor only)
 
 Supports VECTIMUS_SERVER_URL for server-mode evaluation with local fallback,
@@ -26,7 +26,8 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import Decision, DecisionVerdict, VectimusEvent
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli")
+VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex")
+_HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
 
 
 def _log_stderr(msg: str) -> None:
@@ -89,14 +90,14 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "reason": reason,
         }
     # claude-code and claude-agent-sdk need hookSpecificOutput wrapper
-    _claude_sources = ("claude-code", "claude-agent-sdk")
-    event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
+    # codex uses the same wrapper shape.
+    event_key = "hook_event_name" if source in _HOOK_WRAPPER_SOURCES else "hookEventName"
     inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }
-    if source in _claude_sources:
+    if source in _HOOK_WRAPPER_SOURCES:
         return {"hookSpecificOutput": inner}
     # copilot uses the flat format
     return inner
@@ -129,14 +130,13 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "decision": "deny",
             "reason": agent_reason,
         }
-    _claude_sources = ("claude-code", "claude-agent-sdk")
-    event_key = "hook_event_name" if source in _claude_sources else "hookEventName"
+    event_key = "hook_event_name" if source in _HOOK_WRAPPER_SOURCES else "hookEventName"
     inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
         "permissionDecision": "deny",
         "permissionDecisionReason": agent_reason,
     }
-    if source in _claude_sources:
+    if source in _HOOK_WRAPPER_SOURCES:
         return {"hookSpecificOutput": inner}
     return inner
 
@@ -144,9 +144,9 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
 def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = False) -> None:
     """Emit the deny output and exit.
 
-    Claude Code and Gemini CLI require exit 0 with structured JSON — non-zero
-    exit codes are treated as hook crashes, not deliberate denials.  Cursor
-    uses exit 2 for denials.
+    Claude Code, Codex CLI and Gemini CLI require exit 0 with structured
+    JSON. Non-zero exit codes are treated as hook crashes, not deliberate
+    denials. Cursor uses exit 2 for denials.
     """
     if escalate:
         output = _escalate_output(source, payload, reason)
@@ -221,6 +221,7 @@ def hook_cmd(source: str) -> None:
     \b
       echo '{"tool_name":"Bash",...}' | vectimus hook --source claude-code
       echo '{"command":"rm -rf /"}' | vectimus hook --source cursor
+      echo '{"tool_name":"Bash",...}' | vectimus hook --source codex
     """
     # Redirect structlog to stderr so stdout stays clean for JSON responses.
     # AI tools parse stdout for hook decisions; stray log lines break parsing.
@@ -244,6 +245,11 @@ def hook_cmd(source: str) -> None:
         reason = "Vectimus: invalid JSON payload (fail closed)"
         _emit_deny(source, {}, reason)
 
+    if source == "codex" and payload.get("hook_event_name") != "PreToolUse":
+        if debug:
+            _log_stderr("codex hook outside PreToolUse, allowing without evaluation")
+        sys.exit(0)
+
     project_path = _project_path_from_payload(source, payload)
 
     # Try server first (env var overrides config file)
@@ -257,7 +263,7 @@ def hook_cmd(source: str) -> None:
             decision_val = result.get("decision", "deny")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
-                if hook_output is None or source not in ("claude-code", "claude-agent-sdk"):
+                if hook_output is None or source not in _HOOK_WRAPPER_SOURCES:
                     reason = result.get("reason", "Denied by Vectimus")
                     if decision_val == DecisionVerdict.ESCALATE:
                         _emit_deny(source, payload, reason, escalate=True)

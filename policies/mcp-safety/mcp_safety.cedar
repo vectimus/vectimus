@@ -156,5 +156,7 @@ forbid (
 ) when {
     context.file_path like "*.claude/settings.json" ||
     context.file_path like "*.cursor/hooks.json" ||
+    context.file_path like "*.codex/hooks.json" ||
+    context.file_path like "*.codex/config.toml" ||
     context.file_path like "*.vectimus/*"
 };

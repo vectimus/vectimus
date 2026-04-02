@@ -98,9 +98,12 @@ The entire pipeline is governed by Vectimus itself. The agents that write govern
 
 ### Coding tools
 
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [Cursor](https://www.cursor.com/) | [GitHub Copilot](https://github.com/features/copilot) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
-|:-----------:|:------:|:--------------:|:----------:|
-| ✅ | ✅ | ✅ | ✅ |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [Cursor](https://www.cursor.com/) | [GitHub Copilot](https://github.com/features/copilot) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | [Codex CLI](https://developers.openai.com/codex/hooks) |
+|:-----------:|:------:|:--------------:|:----------:|:---------:|
+| ✅ | ✅ | ✅ | ✅ | Experimental |
+
+Codex CLI support is experimental and currently limited to Bash `PreToolUse` hooks.
+Codex only reads repo `.codex/config.toml` in trusted projects.
 
 ### Agent frameworks
 
@@ -207,7 +210,7 @@ agent = LlmAgent(
               └──────────┘ └──────────────┘
 ```
 
-- **Vectimus** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI) into a unified Cedar request format
+- **Vectimus** translates tool-specific payloads (Claude Code, Cursor, Copilot, Gemini CLI and Codex CLI) into a unified Cedar request format
 - **Cedar Engine** evaluates all loaded policies deterministically. No LLM in the loop. Same input, same decision.
 - **Audit Log** records every decision with full context for compliance evidence and incident investigation
 - **Signed Receipt** every evaluation produces an Ed25519-signed JSON receipt. Tamper-evident, offline-verifiable with `vectimus verify`
