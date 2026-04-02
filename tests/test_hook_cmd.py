@@ -40,7 +40,7 @@ class TestSourceValidation:
         assert result.exit_code != 0
 
     def test_valid_sources(self) -> None:
-        for source in ("claude-code", "cursor", "copilot"):
+        for source in ("claude-code", "cursor", "copilot", "codex"):
             exit_code, _ = _run_hook(source, payload=None)
             # Empty stdin should allow (exit 0)
             assert exit_code == 0, f"Expected exit 0 for empty stdin with --source {source}"

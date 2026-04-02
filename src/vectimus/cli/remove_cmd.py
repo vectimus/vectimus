@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from vectimus.cli.detect import ToolName, detect_all
-from vectimus.cli.init_cmd import _is_vectimus_hook
+from vectimus.cli.init_cmd import _command_references_vectimus_source, _is_vectimus_hook
 
 
 @click.command("remove")
@@ -21,9 +21,9 @@ from vectimus.cli.init_cmd import _is_vectimus_hook
 def remove_cmd(force: bool) -> None:
     """Remove Vectimus hooks from all detected tools in this project.
 
-    Removes hook entries from Claude Code, Cursor and Copilot config files.
-    Preserves any non-Vectimus hooks in those files.  Does not remove
-    ~/.vectimus/ config or audit logs.
+    Removes hook entries from Claude Code, Cursor, Copilot, Gemini CLI and
+    Codex CLI config files. Preserves any non-Vectimus hooks in those files.
+    Does not remove ~/.vectimus/ config or audit logs.
 
     \b
       vectimus remove          Remove hooks (with confirmation)
@@ -60,6 +60,11 @@ def remove_cmd(force: bool) -> None:
             if path.exists() and _has_vectimus_hooks_gemini(path):
                 removals.append(("Gemini CLI", path))
 
+        elif tool_name == ToolName.CODEX:
+            path = Path(".codex") / "hooks.json"
+            if path.exists() and _has_vectimus_hooks_codex(path):
+                removals.append(("Codex CLI", path))
+
     if not removals:
         click.echo("No Vectimus hooks found in this project.")
         return
@@ -76,6 +81,7 @@ def remove_cmd(force: bool) -> None:
         "Cursor": _remove_cursor,
         "VS Code / Copilot": _remove_copilot,
         "Gemini CLI": _remove_gemini_cli,
+        "Codex CLI": _remove_codex_cli,
     }
 
     for display_name, path in removals:
@@ -264,3 +270,62 @@ def _remove_gemini_cli(settings_path: Path) -> None:
         settings_path.unlink()
     else:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def _is_vectimus_codex_hook(hook: dict) -> bool:
+    """Check if a Codex hook definition was created by Vectimus."""
+    return (
+        hook.get("type") == "command"
+        and _command_references_vectimus_source(hook.get("command", ""), "codex")
+    )
+
+
+def _has_vectimus_hooks_codex(hooks_path: Path) -> bool:
+    """Check if a Codex hooks.json file has Vectimus Codex hooks."""
+    try:
+        data = json.loads(hooks_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    entries = data.get("hooks", {}).get("PreToolUse", [])
+    for entry in entries:
+        hooks = entry.get("hooks", [])
+        if not isinstance(hooks, list):
+            continue
+        if any(_is_vectimus_codex_hook(hook) for hook in hooks if isinstance(hook, dict)):
+            return True
+    return False
+
+
+def _remove_codex_cli(hooks_path: Path) -> None:
+    """Remove Vectimus Codex hooks from .codex/hooks.json."""
+    try:
+        data = json.loads(hooks_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+
+    entries = data.get("hooks", {}).get("PreToolUse", [])
+    cleaned: list[dict] = []
+    for entry in entries:
+        hooks = entry.get("hooks", [])
+        if not isinstance(hooks, list):
+            cleaned.append(entry)
+            continue
+        non_vectimus = [
+            hook for hook in hooks if isinstance(hook, dict) and not _is_vectimus_codex_hook(hook)
+        ]
+        if non_vectimus:
+            cleaned.append({**entry, "hooks": non_vectimus})
+
+    if cleaned:
+        data["hooks"]["PreToolUse"] = cleaned
+    elif "PreToolUse" in data.get("hooks", {}):
+        del data["hooks"]["PreToolUse"]
+
+    if "hooks" in data and not data["hooks"]:
+        del data["hooks"]
+
+    if not data:
+        hooks_path.unlink(missing_ok=True)
+    else:
+        hooks_path.write_text(json.dumps(data, indent=2) + "\n")
