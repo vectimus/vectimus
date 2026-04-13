@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-04-13
+
+### Added
+
+- Experimental Codex CLI hook support: Bash shell commands governed via `PreToolUse` hooks. File and MCP coverage limited by Codex upstream. Windows unsupported.
+- `vectimus init`, `remove`, `status` and MCP discovery now include Codex CLI
+- Cedar policies protect `.codex/hooks.json` and `.codex/config.toml` from agent tampering
+
+### Changed
+
+- `vectimus status` reports a tool as configured only when a Vectimus hook is present. Projects with third-party hooks but no Vectimus hook correctly show as not configured.
+
 ## [0.20.0] - 2026-03-28
 
 ### Added
