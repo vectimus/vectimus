@@ -87,7 +87,7 @@ docs/               # Documentation
 
 **Incident and standards-driven policies.**  Every policy rule must reference a real-world incident where possible or reference a control in a set of standards or recommendations like OWASP, etc.  Rules that exist "because best practice" are weak.  Rules that exist because a specific attack compromised thousands of developers are compelling.
 
-**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all 78 rules (11 packs) with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
+**Performance target.**  Local evaluation <50ms p99 (CI guard).  Actual measured performance is ~3ms p99 across all loaded rules (11 packs) with 10,000 events.  The benchmark suite (`tests/test_benchmark.py`) covers mixed workloads, deny-heavy worst case, content inspection double evaluation, concurrent threading and throughput.
 
 **No telemetry.**  The open-source version sends no usage data and makes no network calls by default.  An opt-in policy sync feature can be enabled via ``[updates] auto_sync = true`` in ``~/.vectimus/config.toml`` to fetch updated policies from ``api.vectimus.com``.  When enabled it sends the installed version via the User-Agent header.  No other data leaves the machine.
 
