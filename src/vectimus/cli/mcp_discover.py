@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from vectimus.cli.detect import DetectionReport, ToolName
@@ -20,12 +21,26 @@ _TOOL_MCP_CONFIGS: dict[ToolName, list[tuple[str, str]]] = {
     ToolName.COPILOT: [
         (".vscode/mcp.json", "servers"),
     ],
+    ToolName.CODEX: [],
 }
 
 # Project-level config files checked relative to cwd.
 _PROJECT_MCP_CONFIGS: dict[ToolName, list[tuple[str, str]]] = {
     ToolName.CLAUDE_CODE: [
         (".mcp.json", "mcpServers"),
+    ],
+    ToolName.CODEX: [],
+}
+
+_TOOL_MCP_TOML_CONFIGS: dict[ToolName, list[str]] = {
+    ToolName.CODEX: [
+        ".codex/config.toml",
+    ],
+}
+
+_PROJECT_MCP_TOML_CONFIGS: dict[ToolName, list[str]] = {
+    ToolName.CODEX: [
+        ".codex/config.toml",
     ],
 }
 
@@ -60,6 +75,12 @@ def discover_mcp_servers(
         for rel_path, key in _PROJECT_MCP_CONFIGS.get(tool_name, []):
             servers.update(_read_server_names(project / rel_path, key))
 
+        for rel_path in _TOOL_MCP_TOML_CONFIGS.get(tool_name, []):
+            servers.update(_read_toml_server_names(home / rel_path))
+
+        for rel_path in _PROJECT_MCP_TOML_CONFIGS.get(tool_name, []):
+            servers.update(_read_toml_server_names(project / rel_path))
+
         if servers:
             result[tool_name] = sorted(servers)
 
@@ -81,3 +102,25 @@ def _read_server_names(path: Path, key: str) -> list[str]:
     if not isinstance(servers, dict):
         return []
     return list(servers.keys())
+
+
+def _read_toml_server_names(path: Path) -> list[str]:
+    """Extract enabled Codex MCP server names from a TOML config file."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError, ValueError):
+        return []
+
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return []
+
+    names: list[str] = []
+    for name, config in servers.items():
+        if not isinstance(config, dict):
+            continue
+        if config.get("enabled") is False:
+            continue
+        names.append(name)
+    return names

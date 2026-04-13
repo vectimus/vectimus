@@ -1,8 +1,8 @@
 """Cross-platform detection of AI coding tools.
 
-Detects Claude Code, Cursor and VS Code/Copilot across Windows, macOS and
-Linux.  Checks PATH first for speed, then falls back to known installation
-directories and config directories per platform.
+Detects Claude Code, Cursor, VS Code/Copilot, Gemini CLI and Codex CLI
+across Windows, macOS and Linux. Checks PATH first for speed, then falls
+back to known installation directories and config directories per platform.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ class ToolName(StrEnum):
     CURSOR = "cursor"
     COPILOT = "copilot"
     GEMINI_CLI = "gemini-cli"
+    CODEX = "codex"
 
 
 class DetectionMethod(StrEnum):
@@ -63,6 +64,27 @@ class DetectionReport:
         return [r for r in self.results.values() if not r.found]
 
 
+TOOL_DISPLAY_NAMES: dict[ToolName, str] = {
+    ToolName.CLAUDE_CODE: "Claude Code / Agent SDK",
+    ToolName.CURSOR: "Cursor",
+    ToolName.COPILOT: "VS Code / Copilot",
+    ToolName.GEMINI_CLI: "Gemini CLI",
+    ToolName.CODEX: "Codex CLI",
+}
+
+
+def tool_runtime_supported(tool: ToolName) -> tuple[bool, str | None]:
+    """Return whether the tool is supported in the current runtime.
+
+    Codex hooks exist upstream but are currently disabled on Windows.
+    Detection still reports the installed CLI so status can explain why
+    project-level hook setup is skipped.
+    """
+    if tool == ToolName.CODEX and sys.platform == "win32":
+        return False, "hooks are currently disabled on Windows"
+    return True, None
+
+
 def detect_all() -> DetectionReport:
     """Detect all supported tools on the current platform.
 
@@ -73,6 +95,7 @@ def detect_all() -> DetectionReport:
     report.results[ToolName.CURSOR] = _detect_cursor()
     report.results[ToolName.COPILOT] = _detect_vscode()
     report.results[ToolName.GEMINI_CLI] = _detect_gemini_cli()
+    report.results[ToolName.CODEX] = _detect_codex_cli()
     return report
 
 
@@ -83,6 +106,7 @@ def detect_tool(tool: ToolName) -> ToolDetectionResult:
         ToolName.CURSOR: _detect_cursor,
         ToolName.COPILOT: _detect_vscode,
         ToolName.GEMINI_CLI: _detect_gemini_cli,
+        ToolName.CODEX: _detect_codex_cli,
     }
     return detectors[tool]()
 
@@ -288,6 +312,38 @@ def _detect_gemini_cli() -> ToolDetectionResult:
         return result
 
     result.details = "Not found on PATH or via ~/.gemini/ directory."
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Codex CLI
+# ---------------------------------------------------------------------------
+
+
+def _detect_codex_cli() -> ToolDetectionResult:
+    """Detect Codex CLI via PATH or config directory.
+
+    Codex installs a ``codex`` binary on PATH and stores local
+    configuration under ``~/.codex/``.
+    """
+    result = ToolDetectionResult(tool=ToolName.CODEX)
+
+    which = shutil.which("codex")
+    if which:
+        result.found = True
+        result.executable_path = which
+        result.method = DetectionMethod.PATH
+        result.details = f"Found on PATH: {which}"
+        return result
+
+    config_dir = Path.home() / ".codex"
+    if config_dir.is_dir():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = f"Config directory exists: {config_dir}"
+        return result
+
+    result.details = "Not found on PATH or via ~/.codex/ directory."
     return result
 
 
