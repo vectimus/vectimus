@@ -113,8 +113,8 @@ class TestPolicyAnnotations:
             )
 
     def test_rule_count(self, all_owasp_rules) -> None:
-        """All packs combined should contain 78 rules."""
-        assert len(all_owasp_rules) == 78
+        """All packs combined should contain 79 rules."""
+        assert len(all_owasp_rules) == 79
 
 
 # ---------------------------------------------------------------------------
