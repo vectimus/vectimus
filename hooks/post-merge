@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# post-merge hook: refresh vendored policies/ from canonical vectimus/policies.
+#
+# Runs after every successful `git pull` / `git merge`.  Idempotent: if the
+# vendored copy already matches canonical@main, nothing changes.  Quiet on
+# no-change, verbose on update.
+#
+# Skip with VECTIMUS_SKIP_POLICY_SYNC=1.
+
+set -e
+
+if [[ "${VECTIMUS_SKIP_POLICY_SYNC:-}" == "1" ]]; then
+    exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -z "$repo_root" ]] && exit 0
+[[ ! -x "$repo_root/scripts/sync-policies.sh" ]] && exit 0
+
+# Run the sync.  Don't fail the merge if the sync hits a network error or
+# similar — just warn.
+if ! "$repo_root/scripts/sync-policies.sh" --quiet 2>&1 | grep -v 'already up-to-date' || true; then
+    :
+fi
+
+exit 0
