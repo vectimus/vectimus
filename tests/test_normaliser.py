@@ -724,6 +724,52 @@ class TestShellFileOperationDetection:
         assert event.action.action_type == ActionType.FILE_WRITE
         assert event.action.file_path == ".claude/settings.json"
 
+    # -- Symlink evasion: ln -s reclassifies as file_read of target (issue #38) --
+
+    def test_ln_s_reclassified_as_file_read_of_target(self) -> None:
+        event = normalise(
+            self._bash_payload("ln -s /home/test/super-safe-project/.env /tmp/env_link"),
+            "claude-code",
+        )
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/home/test/super-safe-project/.env"
+
+    def test_ln_sf_combined_flag(self) -> None:
+        event = normalise(self._bash_payload("ln -sf ~/.aws/credentials /tmp/c"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "~/.aws/credentials"
+
+    def test_ln_fs_combined_flag(self) -> None:
+        event = normalise(self._bash_payload("ln -fs ~/.ssh/id_rsa /tmp/k"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "~/.ssh/id_rsa"
+
+    def test_ln_long_symbolic_flag(self) -> None:
+        event = normalise(self._bash_payload("ln --symbolic /etc/passwd /tmp/p"), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/etc/passwd"
+
+    def test_ln_s_chained_with_cat_picks_target(self) -> None:
+        # The original bypass: ln -s + cat in one command.  Target wins so
+        # secrets-001 (file_read of *.env) fires, not the harmless /tmp read.
+        cmd = "ln -s /home/test/.env /tmp/x && cat /tmp/x"
+        event = normalise(self._bash_payload(cmd), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/home/test/.env"
+
+    def test_ln_s_quoted_target(self) -> None:
+        cmd = 'ln -s "/path with spaces/.env" /tmp/link'
+        event = normalise(self._bash_payload(cmd), "claude-code")
+        assert event.action.action_type == ActionType.FILE_READ
+        assert event.action.file_path == "/path with spaces/.env"
+
+    def test_ln_hardlink_not_reclassified(self) -> None:
+        # No -s flag: hardlink, different attack profile, not covered here.
+        # Should fall through to default shell_command (or cp/mv detection).
+        event = normalise(self._bash_payload("ln /tmp/a /tmp/b"), "claude-code")
+        # Not a FILE_READ via symlink path — should be shell_command.
+        assert event.action.action_type != ActionType.FILE_READ
+
     # -- File writes via sed -i --
 
     def test_sed_inplace_detected(self) -> None:
