@@ -280,6 +280,8 @@ def hook_cmd(source: str) -> None:
     # Try daemon first (eliminates ~200ms Python startup on repeat calls).
     from vectimus.cli.daemon_client import daemon_evaluate
 
+    if debug:
+        _log_stderr(f"daemon_call project_key={project_path}")
     daemon_result = daemon_evaluate(source, payload, str(project_path))
     if daemon_result is not None:
         if debug:

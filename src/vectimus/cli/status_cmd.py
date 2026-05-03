@@ -286,6 +286,32 @@ def status_cmd(log_dir: str | None) -> None:
     except Exception as exc:
         click.echo(f"  Error loading policies: {exc}")
 
+    # -- Temp disables (daemon in-memory state) ------------------------------
+    # Resolve the same way `vectimus rule disable --for` and the hook do, so
+    # any project-key mismatch shows up here as "no temp disables" even when
+    # `vectimus rule list` finds them under a different key.
+    resolved_project = str(project_path.resolve())
+    try:
+        from vectimus.cli.daemon_client import daemon_query_temp_disables
+
+        resp = daemon_query_temp_disables(project=resolved_project)
+        if resp and resp.get("status") == "ok":
+            entries = resp.get("temp_disables", [])
+            click.echo(f"\nTemp disables (project key: {resolved_project}):")
+            if entries:
+                from vectimus.cli.rule_cmd import _format_remaining
+
+                for entry in entries:
+                    rid = entry["rule_id"]
+                    remaining = _format_remaining(entry["remaining_s"])
+                    click.echo(f"  [-] {rid:<25} ({remaining} remaining)")
+            else:
+                click.echo("  (none)")
+        else:
+            click.echo("\nTemp disables: daemon not running")
+    except Exception as exc:
+        click.echo(f"\nTemp disables: query failed ({exc})")
+
     # -- MCP allowlist ------------------------------------------------------
     servers = config.mcp_allowed_servers()
     if servers:

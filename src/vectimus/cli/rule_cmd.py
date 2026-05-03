@@ -181,6 +181,7 @@ def rule_disable(
             raise SystemExit(1)
 
         click.echo(f"Rule '{rule_id}' temporarily disabled for {duration}.")
+        click.echo(f"Project key: {project_path}")
         click.echo("This disable lives in daemon memory and reverts automatically.")
         return
 

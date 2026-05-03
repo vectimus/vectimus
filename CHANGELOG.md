@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `vectimus status` now shows active temp disables and the project key the daemon resolved them under, so project-key mismatches between `rule disable --for` and the hook are visible. Diagnostic for #42.
+- `vectimus rule disable --for` echoes the resolved project key it sent to the daemon. Pair with `status` to confirm both sides agree.
+- Daemon logs `temp_disable_lookup` with the lookup key and stored keys on every active-temp-disable query. Pair with hook `--debug` output (`daemon_call project_key=...`) to confirm the keys match across processes.
+
 ### Fixed
 
 - Daemon no longer breaks every project when the directory it was started from is deleted. The auto-started daemon inherited the hook's cwd (e.g. an ephemeral Claude Code worktree); once that directory was removed, the eager `os.getcwd()` fallback raised `FileNotFoundError` on every request and all tool calls in all projects were denied with `Daemon error (fail closed)` until a manual restart. The daemon now does `os.chdir("/")` at startup, auto-start spawns it with `cwd="/"`, and the per-request cwd fallback is lazy.
