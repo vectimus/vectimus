@@ -234,3 +234,54 @@ class TestLoaderExtraDisabledRules:
 
         loader = PolicyLoader(policy_dirs=[str(tmp_path)], project_path=tmp_path)
         assert loader._extra_disabled_rules == set()
+
+
+class TestFindProjectRoot:
+    """Test the project-root walker that gives temp disable a stable key (issue #42)."""
+
+    def test_returns_self_when_marker_present(self, tmp_path) -> None:
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus").mkdir()
+        (tmp_path / ".vectimus" / "config.toml").write_text("")
+        assert find_project_root(tmp_path) == tmp_path.resolve()
+
+    def test_walks_up_to_project_with_config_toml(self, tmp_path) -> None:
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus").mkdir()
+        (tmp_path / ".vectimus" / "config.toml").write_text("")
+        deep = tmp_path / "a" / "b" / "c"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_walks_up_to_project_with_keys_dir(self, tmp_path) -> None:
+        # `vectimus init` writes `.vectimus/keys/` even without config.toml --
+        # the walker must accept that as a valid project marker.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        deep = tmp_path / "src" / "feature"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_receipts_only_does_not_count(self, tmp_path) -> None:
+        # The hook auto-creates `.vectimus/receipts/` under any cwd it
+        # evaluates against.  Treating that as a project marker would make
+        # every random subdirectory the agent has touched look like its own
+        # project -- and reintroduce the issue #42 mismatch.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / "spurious" / ".vectimus" / "receipts").mkdir(parents=True)
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        spurious = tmp_path / "spurious"
+        assert find_project_root(spurious) == tmp_path.resolve()
+
+    def test_falls_back_to_start_when_no_marker(self, tmp_path) -> None:
+        # Preserves existing behaviour for users with no project-local config
+        # (e.g. running purely against bundled defaults / user-global config).
+        from vectimus.engine.config import find_project_root
+
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == deep.resolve()

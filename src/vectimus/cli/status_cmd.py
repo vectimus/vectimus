@@ -290,7 +290,9 @@ def status_cmd(log_dir: str | None) -> None:
     # Resolve the same way `vectimus rule disable --for` and the hook do, so
     # any project-key mismatch shows up here as "no temp disables" even when
     # `vectimus rule list` finds them under a different key.
-    resolved_project = str(project_path.resolve())
+    from vectimus.engine.config import find_project_root
+
+    resolved_project = str(find_project_root(project_path))
     try:
         from vectimus.cli.daemon_client import daemon_query_temp_disables
 

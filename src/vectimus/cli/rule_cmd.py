@@ -82,12 +82,15 @@ def rule_list(config_path: str | None, policy_dir: str | None) -> None:
     global_disabled = set(loader.config.disabled_rules())
     enforcement_overrides = loader.config.effective_enforcement_overrides(project_path)
 
-    # Query daemon for active temp disables.
+    # Query daemon for active temp disables.  Use the project root (the
+    # directory containing ``.vectimus/``) as the key so we match what
+    # ``rule disable --for`` and the hook send.
     temp_disable_map: dict[str, float] = {}  # rule_id -> remaining_s
     try:
         from vectimus.cli.daemon_client import daemon_query_temp_disables
+        from vectimus.engine.config import find_project_root
 
-        resp = daemon_query_temp_disables(project=str(project_path.resolve()))
+        resp = daemon_query_temp_disables(project=str(find_project_root(project_path)))
         if resp and resp.get("status") == "ok":
             for entry in resp.get("temp_disables", []):
                 temp_disable_map[entry["rule_id"]] = entry["remaining_s"]
@@ -168,7 +171,9 @@ def rule_disable(
             raise SystemExit(1)
 
         duration_s = _parse_duration(duration)
-        project_path = str(Path.cwd().resolve())
+        from vectimus.engine.config import find_project_root
+
+        project_path = str(find_project_root(Path.cwd()))
 
         from vectimus.cli.daemon_client import daemon_temp_disable
 

@@ -176,13 +176,21 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
 
 
 def _project_path_from_payload(source: str, payload: dict) -> Path:
-    """Extract project path from the tool-specific payload."""
+    """Resolve the project root for *payload*.
+
+    Walks up from the payload cwd to the directory containing ``.vectimus/``
+    so the project key is stable across cwd-vs-subdir invocations.  This is
+    the key used for daemon engine cache, temp-disable lookups and project-
+    scoped config (issue #42).
+    """
+    from vectimus.engine.config import find_project_root
+
     if source == "cursor":
         workspace_roots: list[str] = payload.get("workspace_roots", [])
         raw = workspace_roots[0] if workspace_roots else payload.get("cwd") or os.getcwd()
     else:
         raw = payload.get("cwd") or os.getcwd()
-    return Path(raw).resolve()
+    return find_project_root(Path(raw))
 
 
 def _configure_structlog_stderr() -> None:

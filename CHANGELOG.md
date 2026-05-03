@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `vectimus rule disable --for` is now honoured when the agent fires from a subdirectory of the project (#42). Previously the disable was keyed by the cwd at disable time and the hook keyed by the cwd at fire time, so a disable set from the project root never matched a hook fired from `<project>/src/...`. Both sites (and `status`, `rule list`) now walk up to the project root -- the directory containing `.vectimus/config.toml` or `.vectimus/keys/` -- before sending the daemon RPC.
+
 ### Added
 
-- `vectimus status` now shows active temp disables and the project key the daemon resolved them under, so project-key mismatches between `rule disable --for` and the hook are visible. Diagnostic for #42.
-- `vectimus rule disable --for` echoes the resolved project key it sent to the daemon. Pair with `status` to confirm both sides agree.
-- Daemon logs `temp_disable_lookup` with the lookup key and stored keys on every active-temp-disable query. Pair with hook `--debug` output (`daemon_call project_key=...`) to confirm the keys match across processes.
+- `vectimus status` now shows active temp disables and the project key the daemon resolved them under, so any future project-key mismatch is visible without code changes.
+- `vectimus rule disable --for` echoes the resolved project key it sent to the daemon.
+- Daemon logs `temp_disable_lookup` with the lookup key and stored keys on every active-temp-disable query, and the hook in `--debug` mode echoes `daemon_call project_key=...` -- pair them to diagnose any future cross-process key drift.
 
 ### Fixed
 

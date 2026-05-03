@@ -44,6 +44,38 @@ def project_local_config_path(project_path: Path) -> Path:
     return project_path / ".vectimus" / "config.toml"
 
 
+def find_project_root(start: Path) -> Path:
+    """Walk up from *start* looking for the project root.
+
+    A directory counts as the project root if it contains either
+    ``.vectimus/keys/`` (written by ``vectimus init`` when copying the
+    signing public key) or ``.vectimus/config.toml`` (written when the
+    user disables a rule for the project).  The receipts subdirectory
+    alone (``.vectimus/receipts/``) is NOT sufficient: the hook
+    auto-creates that under any cwd it evaluates against, so matching
+    on the directory's mere existence would treat every random
+    subdirectory the agent has touched as its own project.
+
+    Returns the first ancestor (including *start*) that satisfies the
+    check.  If none is found, returns *start* unchanged so callers
+    without a project-local config keep their existing behaviour.
+
+    Used to derive a stable project key shared by ``vectimus rule disable``,
+    the hook evaluator, ``status`` and ``rule list`` so a temp disable set
+    from the project root is honoured when the agent fires from a
+    subdirectory (issue #42).
+    """
+    start = start.resolve()
+    candidate = start
+    while True:
+        marker_dir = candidate / ".vectimus"
+        if (marker_dir / "config.toml").is_file() or (marker_dir / "keys").is_dir():
+            return candidate
+        if candidate.parent == candidate:
+            return start
+        candidate = candidate.parent
+
+
 class VectimusConfig:
     """Manages ~/.vectimus/config.toml read and write operations."""
 
