@@ -73,3 +73,30 @@ forbid (
     context.command like "*gc *\\.ssh\\*" ||
     context.command like "*gc *.pem*"
 };
+
+@id("vectimus-secrets-005")
+@description("Block creating symlinks pointing at env files, secrets, credentials or SSH/AWS configs (symlink-evasion bypass of secrets-001/002/003)")
+@incident("vectimus/vectimus#38: Agent bypassed .env protection by running `ln -s /path/.env /tmp/link && cat /tmp/link`. Cedar `like` matches the literal symlink path so secrets-001 missed the read, March 2026")
+@controls("SOC2-CC6.1, EU-AI-15, NIST-CSF-PR.DS-01, ISO27001-A.8.3")
+@suggested_alternative("Read configuration via environment variables or a secrets manager.  Do not create indirect references (symlinks, hardlinks, copies) to credential files.")
+forbid (
+    principal,
+    action == Vectimus::Action::"shell_command",
+    resource
+) when {
+    // Symlink creation: ln -s, ln -sf, ln -fs, ln --symbolic
+    (context.command like "*ln -s*" ||
+     context.command like "*ln -sf*" ||
+     context.command like "*ln -fs*" ||
+     context.command like "*ln --symbolic*") &&
+    // Pointing at a sensitive path
+    (context.command like "*.env*" ||
+     context.command like "*.aws/*" ||
+     context.command like "*.ssh/*" ||
+     context.command like "*.pem*" ||
+     context.command like "*.key*" ||
+     context.command like "*/secrets/*" ||
+     context.command like "*/.secrets/*" ||
+     context.command like "*credentials.*" ||
+     context.command like "*.npmrc*")
+};

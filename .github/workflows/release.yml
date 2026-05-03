@@ -12,6 +12,21 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+      - name: Checkout canonical policies
+        uses: actions/checkout@v6
+        with:
+          repository: vectimus/policies
+          ref: main
+          path: policies-canonical
+      - name: Sync canonical policies into build tree
+        run: |
+          rsync -a --delete \
+            --exclude='.git/' --exclude='.git*' \
+            --exclude='scripts/' --exclude='tests/' \
+            --exclude='CHANGELOG.md' --exclude='CONTRIBUTING.md' \
+            --exclude='LICENSE' --exclude='README.md' \
+            --exclude='SECURITY.md' --exclude='VERSION' \
+            policies-canonical/ policies/
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

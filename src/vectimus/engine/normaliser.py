@@ -154,6 +154,18 @@ _PYTHON_WRITE_RE = re.compile(
     r"""(?:\s*,\s*["'][wax]|[^)]*\)\.write\s*\()"""
 )
 
+# ln -s / -sf / -fs / --symbolic <target> <link>: capture target path so the
+# action is reclassified as file_read against the symlink target.  Closes the
+# bypass in vectimus/vectimus#38 where `ln -s /path/.env /tmp/x && cat /tmp/x`
+# read .env via a non-matching alias path.
+_LN_SYMLINK_RE = re.compile(
+    r"\bln\s+"
+    r"(?:-(?:[a-zA-Z]*s[a-zA-Z]*)|--symbolic)\b"
+    r"(?:\s+-\S+)*"
+    r"\s+"
+    r"""(?:"([^"]+)"|'([^']+)'|(\S+))"""
+)
+
 # dd of=file
 _DD_OF_RE = re.compile(r"\bdd\b.*?\bof=(\S+)")
 
@@ -330,6 +342,16 @@ def _refine_shell_action(command: str) -> tuple[str, str | None]:
         return ActionType.PACKAGE_OPERATION, None
     if first_word == _GIT_PREFIX:
         return ActionType.GIT_OPERATION, None
+
+    # Symlink creation (`ln -s target link`) reclassifies as file_read against
+    # the *target* — closes vectimus/vectimus#38 where existing read policies
+    # missed the indirection.  Runs before file_write/file_read so the target
+    # wins over any link-side path on chained commands.
+    m = _LN_SYMLINK_RE.search(command)
+    if m:
+        target = m.group(1) or m.group(2) or m.group(3)
+        if target:
+            return ActionType.FILE_READ, target
 
     # Check for file writes first — they are higher risk than reads.
     write_target = _detect_file_write(command)
