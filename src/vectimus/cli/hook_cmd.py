@@ -26,8 +26,8 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import Decision, DecisionVerdict, VectimusEvent
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex")
-_HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
+VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex", "pi")
+_HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex", "pi")
 
 
 def _log_stderr(msg: str) -> None:
