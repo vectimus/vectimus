@@ -106,35 +106,26 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
 def _escalate_output(source: str, payload: dict, reason: str) -> dict:
     """Build the tool-specific escalate output.
 
-    Local hooks cannot reliably prompt the user for approval:
-    - Claude Code ignores "ask" when the tool is in the allow list.
-    - Cursor does not support "ask" on preToolUse hooks.
-
-    So escalate falls back to deny with a descriptive message on all
-    local sources.  Server mode can implement real escalation workflows
-    (e.g. PagerDuty, Slack approval) before returning allow/deny.
+    Claude Code supports permissionDecision "ask" which prompts the user
+    for approval.  Cursor does not support "ask", so it falls back to deny.
     """
-    escalate_reason = f"[escalate] {reason}. Run this command manually if you approve."
-    agent_reason = (
-        f"[escalate] {reason}. "
-        "This requires human approval -- the user must run it outside the agent."
-    )
+    escalate_reason = f"[escalate] {reason}"
     if source == "cursor":
         return {
             "permission": "deny",
             "user_message": escalate_reason,
-            "agent_message": agent_reason,
+            "agent_message": escalate_reason,
         }
     if source == "gemini-cli":
         return {
             "decision": "deny",
-            "reason": agent_reason,
+            "reason": escalate_reason,
         }
     event_key = "hook_event_name" if source in _HOOK_WRAPPER_SOURCES else "hookEventName"
     inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
-        "permissionDecision": "deny",
-        "permissionDecisionReason": agent_reason,
+        "permissionDecision": "ask",
+        "permissionDecisionReason": escalate_reason,
     }
     if source in _HOOK_WRAPPER_SOURCES:
         return {"hookSpecificOutput": inner}
