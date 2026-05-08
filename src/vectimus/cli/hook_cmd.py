@@ -13,9 +13,11 @@ and VECTIMUS_DEBUG for diagnostic logging to stderr.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -44,6 +46,103 @@ def _log_stderr_overrides(matched_policy_ids: list[str]) -> None:
     for pid in matched_policy_ids:
         _log_stderr(f"To disable for this project: vectimus rule disable {pid}")
         _log_stderr(f"To disable everywhere: vectimus rule disable {pid} --global")
+
+
+_RETRY_STATE_TTL_SECONDS = 300
+_RETRY_STATE_PATH = Path.home() / ".vectimus" / "prompt_on_retry_state.json"
+
+
+def _blocked_call_fingerprint(source: str, payload: dict, project_path: Path) -> str:
+    """Return a stable fingerprint for an identical blocked tool call.
+
+    Hook payloads can include per-invocation metadata, so fingerprint the
+    normalised action instead of the raw payload.
+    """
+    try:
+        event = normalise(payload, source)
+        material = {
+            "source": source,
+            "project_path": str(project_path),
+            "action_type": event.action.action_type,
+            "raw_tool_name": event.action.raw_tool_name,
+            "command": event.action.command,
+            "file_path": event.action.file_path,
+            "url": event.action.url,
+            "mcp_server": event.action.mcp_server,
+            "mcp_tool": event.action.mcp_tool,
+            "package_name": event.action.package_name,
+        }
+    except Exception:
+        material = {
+            "source": source,
+            "project_path": str(project_path),
+            "payload": payload,
+        }
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _is_repeat_blocked_call(source: str, payload: dict, project_path: Path) -> bool:
+    """Record a blocked call. Return True if it is an identical recent retry."""
+    now = time.time()
+    fingerprint = _blocked_call_fingerprint(source, payload, project_path)
+    state: dict[str, float] = {}
+
+    try:
+        if _RETRY_STATE_PATH.exists():
+            raw = json.loads(_RETRY_STATE_PATH.read_text())
+            if isinstance(raw, dict):
+                state = {str(k): float(v) for k, v in raw.items()}
+    except Exception:
+        state = {}
+
+    state = {
+        k: v
+        for k, v in state.items()
+        if now - v <= _RETRY_STATE_TTL_SECONDS
+    }
+    is_repeat = fingerprint in state
+    state[fingerprint] = now
+
+    try:
+        _RETRY_STATE_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp_path = _RETRY_STATE_PATH.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(state, sort_keys=True))
+        os.replace(tmp_path, _RETRY_STATE_PATH)
+    except Exception:
+        pass
+
+    return is_repeat
+
+
+def _prompt_on_retry_reason(reason: str, matched_policy_ids: list[str]) -> str:
+    """Build the first-deny message shown to the agent in prompt-on-retry mode."""
+    matched = ", ".join(matched_policy_ids) if matched_policy_ids else "unknown rule"
+    return (
+        "Blocked by Vectimus for safety. "
+        f"Matched {matched}: {reason}. "
+        "If this tool call is integral to your task, run the exact same "
+        "command again to ask the user for approval. Otherwise, continue with another approach."
+    )
+
+
+def _emit_blocked_decision(
+    *,
+    source: str,
+    payload: dict,
+    reason: str,
+    matched_policy_ids: list[str],
+    project_path: Path,
+    prompt_on_retry: bool,
+) -> None:
+    """Emit DENY or ASK depending on prompt-on-retry state."""
+    if prompt_on_retry:
+        if _is_repeat_blocked_call(source, payload, project_path):
+            _emit_ask(source, payload, reason)
+        else:
+            _emit_deny(source, payload, _prompt_on_retry_reason(reason, matched_policy_ids))
+    else:
+        _emit_deny(source, payload, reason)
 
 
 def _post_to_server(payload: dict, server_url: str, source: str) -> dict | None:
@@ -139,6 +238,39 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
     if source in _HOOK_WRAPPER_SOURCES:
         return {"hookSpecificOutput": inner}
     return inner
+
+
+def _ask_output(source: str, payload: dict, reason: str) -> dict:
+    """Build tool-specific ask output for a repeated identical blocked call."""
+    ask_reason = f"[escalate] {reason}"
+    if source == "cursor":
+        return {
+            "permission": "deny",
+            "user_message": ask_reason,
+            "agent_message": ask_reason,
+        }
+    if source == "gemini-cli":
+        return {
+            "decision": "deny",
+            "reason": ask_reason,
+        }
+    event_key = "hook_event_name" if source in _HOOK_WRAPPER_SOURCES else "hookEventName"
+    inner = {
+        "hookEventName": payload.get(event_key, "PreToolUse"),
+        "permissionDecision": "ask",
+        "permissionDecisionReason": ask_reason,
+    }
+    if source in _HOOK_WRAPPER_SOURCES:
+        return {"hookSpecificOutput": inner}
+    return inner
+
+
+def _emit_ask(source: str, payload: dict, reason: str) -> None:
+    """Emit ask output and exit."""
+    print(json.dumps(_ask_output(source, payload, reason)))
+    if source == "cursor":
+        sys.exit(2)
+    sys.exit(0)
 
 
 def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = False) -> None:
@@ -263,14 +395,35 @@ def hook_cmd(source: str) -> None:
         result = _post_to_server(payload, server_url, source)
         if result is not None:
             decision_val = result.get("decision", "deny")
-            if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
+            if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE, DecisionVerdict.CHALLENGE):
                 hook_output = result.get("hookSpecificOutput")
                 if hook_output is None or source not in _HOOK_WRAPPER_SOURCES:
                     reason = result.get("reason", "Denied by Vectimus")
+                    matched = result.get("matched_policy_ids", [])
+                    if decision_val == DecisionVerdict.CHALLENGE:
+                        _emit_blocked_decision(
+                            source=source,
+                            payload=payload,
+                            reason=reason,
+                            matched_policy_ids=matched,
+                            project_path=project_path,
+                            prompt_on_retry=True,
+                        )
                     if decision_val == DecisionVerdict.ESCALATE:
                         _emit_deny(source, payload, reason, escalate=True)
                     else:
                         _emit_deny(source, payload, reason)
+                if decision_val == DecisionVerdict.CHALLENGE:
+                    reason = result.get("reason", "Denied by Vectimus")
+                    matched = result.get("matched_policy_ids", [])
+                    _emit_blocked_decision(
+                        source=source,
+                        payload=payload,
+                        reason=reason,
+                        matched_policy_ids=matched,
+                        project_path=project_path,
+                        prompt_on_retry=True,
+                    )
                 print(json.dumps(hook_output))
                 if source == "cursor":
                     sys.exit(2)
@@ -295,6 +448,21 @@ def hook_cmd(source: str) -> None:
             matched = daemon_result.get("matched_policy_ids", [])
             _log_stderr_overrides(matched)
             _emit_deny(source, payload, reason, escalate=True)
+
+        if verdict == DecisionVerdict.CHALLENGE:
+            reason = daemon_result.get("reason") or "Blocked by Vectimus"
+            if receipt_id:
+                reason += f" (receipt: {receipt_id[:13]})"
+            matched = daemon_result.get("matched_policy_ids", [])
+            _log_stderr_overrides(matched)
+            _emit_blocked_decision(
+                source=source,
+                payload=payload,
+                reason=reason,
+                matched_policy_ids=matched,
+                project_path=project_path,
+                prompt_on_retry=True,
+            )
 
         if verdict == DecisionVerdict.DENY:
             reason = daemon_result.get("reason") or "Denied by Vectimus"
@@ -389,6 +557,20 @@ def hook_cmd(source: str) -> None:
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason, escalate=True)
 
+    if decision.decision == DecisionVerdict.CHALLENGE:
+        reason = decision.reason or "Blocked by Vectimus"
+        if receipt_id:
+            reason += f" (receipt: {receipt_id[:13]})"
+        _log_stderr_overrides(decision.matched_policy_ids)
+        _emit_blocked_decision(
+            source=source,
+            payload=payload,
+            reason=reason,
+            matched_policy_ids=decision.matched_policy_ids,
+            project_path=project_path,
+            prompt_on_retry=True,
+        )
+
     if decision.decision == DecisionVerdict.DENY:
         reason = decision.reason or "Denied by Vectimus"
         if receipt_id:
@@ -441,6 +623,8 @@ def _generate_receipt_async(
         outcome = "DENY"
     elif decision.decision == DecisionVerdict.ESCALATE:
         outcome = "DENY"  # Escalate is deny for receipt purposes
+    elif decision.decision == DecisionVerdict.CHALLENGE:
+        outcome = "DENY"  # Challenge is deny/ask for receipt purposes
     else:
         outcome = "ALLOW"
 

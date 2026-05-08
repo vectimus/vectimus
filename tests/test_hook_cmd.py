@@ -142,6 +142,125 @@ class TestDenyOutputFormat:
         assert "hookEventName" in result
 
 
+class TestAutoBlockEnforcement:
+    """challenge enforcement denies first, asks on identical retry."""
+
+    def test_first_blocked_call_denies_with_retry_guidance(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from vectimus.engine.models import Decision, DecisionVerdict
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "vectimus.cli.hook_cmd._RETRY_STATE_PATH",
+            tmp_path / "prompt_on_retry_state.json",
+        )
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        deny_decision = Decision(
+            decision=DecisionVerdict.CHALLENGE,
+            reason="Blocked by policy test-deny-001: destructive command",
+            matched_policy_ids=["test-deny-001"],
+        )
+
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
+            mock_engine_cls.return_value.evaluate.return_value = deny_decision
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 0
+        result = TestDenyOutputFormat._extract_json(output)
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny"
+        assert "Blocked by Vectimus for safety" in inner["permissionDecisionReason"]
+        assert "test-deny-001" in inner["permissionDecisionReason"]
+        assert "run the exact same command again" in inner["permissionDecisionReason"]
+
+    def test_identical_retry_asks_user(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from vectimus.engine.models import Decision, DecisionVerdict
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "vectimus.cli.hook_cmd._RETRY_STATE_PATH",
+            tmp_path / "prompt_on_retry_state.json",
+        )
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        deny_decision = Decision(
+            decision=DecisionVerdict.CHALLENGE,
+            reason="Blocked by policy test-deny-001: destructive command",
+            matched_policy_ids=["test-deny-001"],
+        )
+
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
+            mock_engine_cls.return_value.evaluate.return_value = deny_decision
+            _run_hook("claude-code", payload)
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 0
+        result = TestDenyOutputFormat._extract_json(output)
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "ask"
+        assert "[escalate]" in inner["permissionDecisionReason"]
+
+    def test_different_blocked_call_denies_again(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from vectimus.engine.models import Decision, DecisionVerdict
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "vectimus.cli.hook_cmd._RETRY_STATE_PATH",
+            tmp_path / "prompt_on_retry_state.json",
+        )
+        first_payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /tmp/a"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        second_payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /tmp/b"},
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+        }
+        deny_decision = Decision(
+            decision=DecisionVerdict.CHALLENGE,
+            reason="Blocked by policy test-deny-001: destructive command",
+            matched_policy_ids=["test-deny-001"],
+        )
+
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
+            mock_engine_cls.return_value.evaluate.return_value = deny_decision
+            _run_hook("claude-code", first_payload)
+            exit_code, output = _run_hook("claude-code", second_payload)
+
+        assert exit_code == 0
+        result = TestDenyOutputFormat._extract_json(output)
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny"
+        assert "Blocked by Vectimus for safety" in inner["permissionDecisionReason"]
+
+
 class TestAllowBehaviour:
     """Safe commands should be allowed."""
 

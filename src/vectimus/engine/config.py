@@ -199,7 +199,7 @@ class VectimusConfig:
 
     # -- Enforcement overrides -----------------------------------------------
 
-    _VALID_ENFORCEMENT_LEVELS = ("deny", "escalate", "observe")
+    _VALID_ENFORCEMENT_LEVELS = ("deny", "escalate", "observe", "challenge")
 
     def get_enforcement_override(
         self, rule_id: str, project_path: Path | None = None
