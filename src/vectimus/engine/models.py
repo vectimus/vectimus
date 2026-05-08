@@ -42,6 +42,7 @@ class DecisionVerdict(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     ESCALATE = "escalate"
+    CHALLENGE = "challenge"
 
 
 class SourceInfo(BaseModel):
