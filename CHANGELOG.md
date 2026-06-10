@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `vectimus rule disable --for` is now honoured when the agent fires from a subdirectory of the project (#42). Previously the disable was keyed by the cwd at disable time and the hook keyed by the cwd at fire time, so a disable set from the project root never matched a hook fired from `<project>/src/...`. Both sites (and `status`, `rule list`) now walk up to the project root -- the directory containing `.vectimus/config.toml` or `.vectimus/keys/` -- before sending the daemon RPC.
+- Receipts no longer sprout `.vectimus/receipts/` directories in every subfolder the agent works from. The same project-root walk fixes receipt placement, and when no `.vectimus` marker exists (hook installed globally, `vectimus init` never run) the walker falls back to the nearest `.git` ancestor so receipts anchor at the repository root. Stray `<subfolder>/.vectimus/` directories created before this fix can be deleted safely.
+- The hook now drops a self-ignoring `.vectimus/.gitignore` (containing `receipts/`) when it auto-creates the receipts directory, so receipts can't be committed in projects that never ran `vectimus init`. Keys and config stay committable.
 
 ### Added
 

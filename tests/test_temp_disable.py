@@ -285,3 +285,35 @@ class TestFindProjectRoot:
         deep = tmp_path / "a" / "b"
         deep.mkdir(parents=True)
         assert find_project_root(deep) == deep.resolve()
+
+    def test_falls_back_to_git_root_when_no_vectimus_marker(self, tmp_path) -> None:
+        # Globally-installed hooks fire in projects that never ran
+        # `vectimus init`.  Without a `.vectimus` marker, anchor at the
+        # repository root so receipts don't sprout in every subdirectory
+        # the agent works from.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".git").mkdir()
+        deep = tmp_path / "src" / "feature"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_git_file_counts_as_git_root(self, tmp_path) -> None:
+        # Worktrees and submodules have a `.git` file, not a directory.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".git").write_text("gitdir: /somewhere/else\n")
+        deep = tmp_path / "pkg"
+        deep.mkdir()
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_vectimus_marker_beats_nearer_git_root(self, tmp_path) -> None:
+        # A vendored repo inside a vectimus project has its own `.git`.
+        # The explicit `.vectimus` marker on the outer project wins -- the
+        # marker is user intent, `.git` is a heuristic.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        vendored = tmp_path / "vendor" / "lib"
+        (vendored / ".git").mkdir(parents=True)
+        assert find_project_root(vendored) == tmp_path.resolve()
