@@ -66,25 +66,55 @@ def find_project_root(start: Path) -> Path:
     a ``.git`` file rather than a directory.  A ``.vectimus`` marker
     on a farther ancestor still wins over a nearer ``.git``: the
     marker is explicit user intent, ``.git`` is a heuristic.  If
-    neither is found, returns *start* unchanged.
+    neither is found, returns the resolved *start* unchanged.
+
+    The home directory never counts as a marker: ``~/.vectimus/`` holds
+    the GLOBAL config and keypair, so treating it as a project root
+    would key every markerless repository under home to the same
+    project -- a temp disable in one repo would suppress the rule in
+    all of them.
+
+    The walk runs on the lexical (unresolved) path first and falls back
+    to the fully resolved path.  Resolving up front would translate a
+    symlinked cwd out of the project tree and silently skip
+    project-local config (the same evasion class as issue #38).  The
+    returned root is always resolved so daemon keys stay stable across
+    symlinked and canonical spellings of the same directory (issue #42).
 
     Used to derive a stable project key shared by ``vectimus rule disable``,
     the hook evaluator, ``status`` and ``rule list`` so a temp disable set
     from the project root is honoured when the agent fires from a
     subdirectory (issue #42).
     """
-    start = start.resolve()
-    candidate = start
-    git_root: Path | None = None
-    while True:
-        marker_dir = candidate / ".vectimus"
-        if (marker_dir / "config.toml").is_file() or (marker_dir / "keys").is_dir():
-            return candidate
-        if git_root is None and (candidate / ".git").exists():
-            git_root = candidate
-        if candidate.parent == candidate:
-            return git_root if git_root is not None else start
-        candidate = candidate.parent
+    home = Path.home().resolve()
+
+    def _scan(base: Path) -> tuple[Path | None, Path | None]:
+        """Walk up from *base*; return (marker_root, nearest_git_root)."""
+        git_root: Path | None = None
+        candidate = base
+        while True:
+            if candidate.resolve() != home:
+                marker_dir = candidate / ".vectimus"
+                if (marker_dir / "config.toml").is_file() or (marker_dir / "keys").is_dir():
+                    return candidate, git_root
+            if git_root is None and (candidate / ".git").exists():
+                git_root = candidate
+            if candidate.parent == candidate:
+                return None, git_root
+            candidate = candidate.parent
+
+    lexical = Path(os.path.normpath(start if start.is_absolute() else Path.cwd() / start))
+    resolved = start.resolve()
+
+    marker_root, git_root = _scan(lexical)
+    if marker_root is None and resolved != lexical:
+        marker_root, resolved_git_root = _scan(resolved)
+        git_root = git_root if git_root is not None else resolved_git_root
+    if marker_root is not None:
+        return marker_root.resolve()
+    if git_root is not None:
+        return git_root.resolve()
+    return resolved
 
 
 class VectimusConfig:

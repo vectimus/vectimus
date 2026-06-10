@@ -317,3 +317,61 @@ class TestFindProjectRoot:
         vendored = tmp_path / "vendor" / "lib"
         (vendored / ".git").mkdir(parents=True)
         assert find_project_root(vendored) == tmp_path.resolve()
+
+    def test_home_directory_never_counts_as_marker(self, tmp_path, monkeypatch) -> None:
+        # ~/.vectimus/ holds the GLOBAL config and keypair, so every user
+        # has both markers at home.  Treating home as a project root would
+        # key every markerless repo under home to the same project -- a
+        # temp disable in one repo would suppress the rule in all of them.
+        from vectimus.engine.config import find_project_root
+
+        fake_home = tmp_path / "home" / "user"
+        (fake_home / ".vectimus" / "keys").mkdir(parents=True)
+        (fake_home / ".vectimus" / "config.toml").write_text("")
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))  # Windows
+
+        repo = fake_home / "code" / "myproject"
+        (repo / ".git").mkdir(parents=True)
+        deep = repo / "src" / "feature"
+        deep.mkdir(parents=True)
+
+        assert find_project_root(deep) == repo.resolve()
+
+    def test_home_exclusion_falls_back_to_start_without_git(self, tmp_path, monkeypatch) -> None:
+        # No marker below home and no .git: fall back to the start path,
+        # never to home itself.
+        from vectimus.engine.config import find_project_root
+
+        fake_home = tmp_path / "home" / "user"
+        (fake_home / ".vectimus" / "keys").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+        deep = fake_home / "scratch" / "notes"
+        deep.mkdir(parents=True)
+
+        assert find_project_root(deep) == deep.resolve()
+
+    def test_symlinked_cwd_still_finds_lexical_project_root(self, tmp_path) -> None:
+        # A symlink inside the project that points outside it must not
+        # cause the walk to leave the project tree (same evasion class as
+        # issue #38).  The lexical path is walked first; resolving up
+        # front would translate `repo/work/sub` to `elsewhere/work/sub`
+        # and skip repo/.vectimus entirely.
+        import sys
+
+        import pytest
+
+        from vectimus.engine.config import find_project_root
+
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires privileges on Windows")
+
+        repo = tmp_path / "repo"
+        (repo / ".vectimus" / "keys").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere" / "work"
+        (elsewhere / "sub").mkdir(parents=True)
+        (repo / "work").symlink_to(elsewhere)
+
+        assert find_project_root(repo / "work" / "sub") == repo.resolve()

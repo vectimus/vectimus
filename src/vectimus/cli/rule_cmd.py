@@ -194,7 +194,12 @@ def rule_disable(
         loader.config.disable_rule(rule_id)
         click.echo(f"Rule '{rule_id}' disabled globally.")
     else:
-        project_path = Path.cwd()
+        # Anchor the on-disk project config at the project root, not the
+        # cwd -- writing .vectimus/config.toml into a subdirectory would
+        # create a new project marker there and splinter the project.
+        from vectimus.engine.config import find_project_root
+
+        project_path = find_project_root(Path.cwd())
         loader.config.disable_rule_for_project(rule_id, project_path)
         from vectimus.engine.config import project_local_config_path
 
@@ -235,11 +240,15 @@ def rule_enable(
         click.echo(f"Rule '{rule_id}' not found.", err=True)
         raise SystemExit(1)
 
-    # Also clear any temp disable for this rule.
+    # Also clear any temp disable for this rule.  Must use the same
+    # project key the disable side stored under (find_project_root),
+    # or an enable from a subdirectory silently misses the entry and
+    # the rule stays suppressed until the TTL expires.
     try:
         from vectimus.cli.daemon_client import daemon_clear_temp_disable
+        from vectimus.engine.config import find_project_root
 
-        resp = daemon_clear_temp_disable(rule_id, str(Path.cwd().resolve()))
+        resp = daemon_clear_temp_disable(rule_id, str(find_project_root(Path.cwd())))
         if resp and resp.get("status") == "ok":
             click.echo(f"Temp disable for '{rule_id}' cleared.")
     except Exception:
@@ -249,7 +258,9 @@ def rule_enable(
         loader.config.enable_rule(rule_id)
         click.echo(f"Rule '{rule_id}' enabled globally.")
     else:
-        project_path = Path.cwd()
+        from vectimus.engine.config import find_project_root
+
+        project_path = find_project_root(Path.cwd())
         # Check if the rule is disabled globally.
         if loader.config.is_rule_disabled(rule_id):
             click.echo(

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import threading
 import uuid
@@ -255,19 +256,30 @@ def _write_receipt_sync(receipt: dict[str, Any], receipts_dir: Path) -> None:
 
 
 def _ensure_receipts_gitignore(receipts_dir: Path) -> None:
-    """Drop a ``.gitignore`` next to the receipts dir so it never gets committed.
+    """Ensure a ``.gitignore`` next to the receipts dir ignores receipts.
 
     ``vectimus init`` adds ``.vectimus/receipts/`` to the project
     ``.gitignore``, but the hook auto-creates the receipts dir in projects
     that never ran init.  A self-ignore inside ``.vectimus/`` covers those
     without touching the project's own ``.gitignore``.  Keys and config
-    stay committable; only receipts are ignored.
+    stay committable; only receipts are ignored.  An existing file
+    without a ``receipts/`` line gets it appended; the write goes through
+    a temp file + ``os.replace`` so concurrent hook invocations can't
+    interleave partial content.
     """
     if receipts_dir.name != "receipts" or receipts_dir.parent.name != ".vectimus":
         return
     gitignore = receipts_dir.parent / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("receipts/\n")
+    content = gitignore.read_text() if gitignore.exists() else ""
+    lines = {line.strip() for line in content.splitlines()}
+    if lines & {"receipts/", "receipts", "*"}:
+        return
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += "receipts/\n"
+    tmp_path = gitignore.parent / ".gitignore.tmp"
+    tmp_path.write_text(content)
+    os.replace(tmp_path, gitignore)
 
 
 # -- Retention cleanup ------------------------------------------------------
