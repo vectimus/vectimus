@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Escalation now emits `permissionDecision: "ask"` for Claude Code, Claude Agent SDK and Codex sources, prompting the user for approval instead of hard-blocking. Claude Code fixed the allow-list limitation that originally forced the deny fallback. Thanks @jaredwideman (#50, #53).
+- Escalation falls back to deny when the hook payload reports `permission_mode` of `auto`, `bypassPermissions` or `dontAsk`. Claude Code silently auto-approves "ask" in those modes (anthropics/claude-code#51255), which would turn an escalation into a silent allow. Cursor, Gemini CLI and Copilot keep the deny fallback (no verified "ask" support).
+
 ## [0.22.0] - 2026-05-03
 
 ### Added
