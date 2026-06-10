@@ -29,6 +29,11 @@ from vectimus.engine.normaliser import normalise
 VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex")
 _HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
 
+# Claude Code silently auto-approves a hook's "ask" decision in these
+# permission modes instead of prompting (anthropics/claude-code#51255,
+# #61918), so emitting "ask" would turn an escalation into a silent allow.
+_PROMPTLESS_PERMISSION_MODES = ("auto", "bypassPermissions", "dontAsk")
+
 
 def _log_stderr(msg: str) -> None:
     """Write diagnostic message to stderr (not visible to agent)."""
@@ -106,26 +111,39 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
 def _escalate_output(source: str, payload: dict, reason: str) -> dict:
     """Build the tool-specific escalate output.
 
-    Claude Code supports permissionDecision "ask" which prompts the user
-    for approval.  Cursor does not support "ask", so it falls back to deny.
+    Claude Code, the Agent SDK and Codex support permissionDecision "ask"
+    which prompts the user for approval.  But Claude Code auto-approves
+    "ask" without prompting in auto, dontAsk and bypassPermissions modes,
+    so in those modes escalate falls back to deny -- an escalation must
+    never become a silent allow.  Cursor, Gemini CLI and Copilot have no
+    verified "ask" support and always fall back to deny.
     """
     escalate_reason = f"[escalate] {reason}"
+    deny_reason = (
+        f"{escalate_reason}. This requires human approval -- "
+        "run the command manually if you approve, or re-run the agent "
+        "in a permission mode that can prompt."
+    )
     if source == "cursor":
         return {
             "permission": "deny",
-            "user_message": escalate_reason,
-            "agent_message": escalate_reason,
+            "user_message": deny_reason,
+            "agent_message": deny_reason,
         }
     if source == "gemini-cli":
         return {
             "decision": "deny",
-            "reason": escalate_reason,
+            "reason": deny_reason,
         }
     event_key = "hook_event_name" if source in _HOOK_WRAPPER_SOURCES else "hookEventName"
+    can_prompt = (
+        source in _HOOK_WRAPPER_SOURCES
+        and payload.get("permission_mode") not in _PROMPTLESS_PERMISSION_MODES
+    )
     inner = {
         "hookEventName": payload.get(event_key, "PreToolUse"),
-        "permissionDecision": "ask",
-        "permissionDecisionReason": escalate_reason,
+        "permissionDecision": "ask" if can_prompt else "deny",
+        "permissionDecisionReason": escalate_reason if can_prompt else deny_reason,
     }
     if source in _HOOK_WRAPPER_SOURCES:
         return {"hookSpecificOutput": inner}

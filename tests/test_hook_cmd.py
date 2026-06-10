@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 
 from vectimus.cli.hook_cmd import hook_cmd
@@ -174,46 +175,87 @@ class TestAllowBehaviour:
 
 
 class TestEscalateFailsClosed:
-    """ESCALATE must fall back to deny locally.
+    """ESCALATE must prompt where prompting works and deny everywhere else.
 
-    Local hooks cannot reliably prompt the user for approval due to
-    limitations in Claude Code and Cursor.  Escalate falls back to deny
-    with a descriptive message.  Server mode can implement real approval
-    workflows (PagerDuty, Slack, etc.).
+    Claude Code, the Agent SDK and Codex support permissionDecision "ask",
+    but Claude Code auto-approves "ask" without prompting in auto, dontAsk
+    and bypassPermissions modes (anthropics/claude-code#51255).  Escalate
+    must emit "ask" only when the prompt can actually reach the user and
+    fall back to deny otherwise -- never a silent allow.  Cursor, Gemini
+    CLI and Copilot have no verified "ask" support and always deny.
 
     Exit codes: 0 for claude-code/copilot, 2 for cursor.
     """
 
-    def test_escalate_denied_local_claude_code(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.chdir(tmp_path)
-        from unittest.mock import patch
-
+    @staticmethod
+    def _escalate_decision():
         from vectimus.engine.models import Decision, DecisionVerdict
 
-        escalate_decision = Decision(
+        return Decision(
             decision=DecisionVerdict.ESCALATE,
             reason="Requires human approval",
             matched_policy_ids=["test-escalate-001"],
         )
+
+    @pytest.mark.parametrize("mode", [None, "default", "acceptEdits", "plan"])
+    def test_escalate_asks_in_promptable_modes_claude_code(
+        self, tmp_path, monkeypatch, mode
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
         payload = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
             "hook_event_name": "PreToolUse",
             "cwd": str(tmp_path),
         }
+        if mode is not None:
+            payload["permission_mode"] = mode
         with (
             patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
             patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
         ):
-            mock_engine_cls.return_value.evaluate.return_value = escalate_decision
+            mock_engine_cls.return_value.evaluate.return_value = self._escalate_decision()
             exit_code, output = _run_hook("claude-code", payload)
 
         assert exit_code == 0, "ESCALATE must produce exit code 0 for claude-code"
         result = self._extract_json(output)
         assert "hookSpecificOutput" in result
         inner = result["hookSpecificOutput"]
-        assert inner["permissionDecision"] == "deny"
+        assert inner["permissionDecision"] == "ask"
         assert "[escalate]" in inner["permissionDecisionReason"]
+
+    @pytest.mark.parametrize("mode", ["auto", "bypassPermissions", "dontAsk"])
+    def test_escalate_denies_in_promptless_modes_claude_code(
+        self, tmp_path, monkeypatch, mode
+    ) -> None:
+        """Claude Code swallows "ask" in these modes, so escalate must deny."""
+        monkeypatch.chdir(tmp_path)
+        from unittest.mock import patch
+
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+            "hook_event_name": "PreToolUse",
+            "permission_mode": mode,
+            "cwd": str(tmp_path),
+        }
+        with (
+            patch("vectimus.cli.daemon_client.daemon_evaluate", return_value=None),
+            patch("vectimus.cli.hook_cmd.PolicyEngine") as mock_engine_cls,
+        ):
+            mock_engine_cls.return_value.evaluate.return_value = self._escalate_decision()
+            exit_code, output = _run_hook("claude-code", payload)
+
+        assert exit_code == 0, "ESCALATE must produce exit code 0 for claude-code"
+        result = self._extract_json(output)
+        inner = result["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny", (
+            f"escalate must deny in {mode} mode -- Claude Code auto-approves ask"
+        )
+        assert "[escalate]" in inner["permissionDecisionReason"]
+        assert "human approval" in inner["permissionDecisionReason"]
 
     def test_escalate_denied_local_cursor(self, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
