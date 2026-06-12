@@ -289,3 +289,63 @@ class TestProjectOverrides:
 
         result = cfg.load_project_overrides(project)
         assert result == set()
+
+
+class TestLogDirAnchoring:
+    """Configured log directories must never resolve against the process
+    cwd: the daemon runs with cwd "/" and hooks run from arbitrary
+    project subdirectories, so a cwd-relative path would land somewhere
+    different on every call."""
+
+    def test_relative_audit_log_dir_anchors_at_project_root(
+        self, config_path: str, tmp_path: Path
+    ) -> None:
+        project = tmp_path / "proj"
+        (project / ".vectimus").mkdir(parents=True)
+        (project / ".vectimus" / "config.toml").write_text('[audit]\nlog_dir = "logs/audit"\n')
+
+        cfg = VectimusConfig(config_path)
+        result = cfg.get_audit_log_dir(project)
+
+        assert result == str(project / "logs" / "audit")
+
+    def test_relative_audit_log_dir_without_project_anchors_at_home(self, config_path: str) -> None:
+        path = Path(config_path)
+        path.write_text('[audit]\nlog_dir = "my-logs"\n')
+
+        cfg = VectimusConfig(config_path)
+        result = cfg.get_audit_log_dir()
+
+        assert result == str(Path.home() / "my-logs")
+
+    def test_absolute_audit_log_dir_unchanged(self, config_path: str, tmp_path: Path) -> None:
+        target = tmp_path / "abs-logs"
+        Path(config_path).write_text(f'[audit]\nlog_dir = "{target}"\n')
+
+        cfg = VectimusConfig(config_path)
+        assert cfg.get_audit_log_dir() == str(target)
+
+    def test_tilde_audit_log_dir_expanded(self, config_path: str) -> None:
+        Path(config_path).write_text('[audit]\nlog_dir = "~/tilde-logs"\n')
+
+        cfg = VectimusConfig(config_path)
+        assert cfg.get_audit_log_dir() == str(Path.home() / "tilde-logs")
+
+    def test_relative_env_var_anchored(self, config_path: str, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("VECTIMUS_LOG_DIR", "env-logs")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        cfg = VectimusConfig(config_path)
+        assert cfg.get_audit_log_dir(project) == str(project / "env-logs")
+        assert cfg.get_audit_log_dir() == str(Path.home() / "env-logs")
+
+    def test_default_audit_log_dir_unchanged(self, config_path: str) -> None:
+        cfg = VectimusConfig(config_path)
+        assert cfg.get_audit_log_dir() == str(Path.home() / ".vectimus" / "logs")
+
+    def test_relative_logging_dir_anchors_at_home(self, config_path: str) -> None:
+        Path(config_path).write_text('[logging]\ndir = "rel-logs"\n')
+
+        cfg = VectimusConfig(config_path)
+        assert cfg.get_log_dir() == str(Path.home() / "rel-logs")
