@@ -34,6 +34,33 @@ def _safe_int(value: Any, *, default: int, minimum: int = 0) -> int:
     return max(result, minimum)
 
 
+def _anchor_dir(raw: str, project_path: Path | None) -> str:
+    """Resolve a configured directory to an absolute path.
+
+    ``~`` is expanded; a relative path is anchored at *project_path*
+    (or the home directory when no project is known).  Configured
+    directories must never resolve against the process cwd -- the
+    daemon runs with cwd ``/`` and hooks run from arbitrary project
+    subdirectories.
+
+    Windows drive-relative (``D:logs``) and root-relative (``\\logs``)
+    paths are neither absolute nor safely anchorable (they resolve
+    against per-drive cwd state or the anchor's drive root), so they
+    fall back to the default log directory rather than failing --
+    the audit path must never take evaluation down.
+    """
+    path = Path(raw).expanduser()
+    # POSIX absolute paths also have root-without-drive, so this check
+    # is Windows-only.
+    if os.name == "nt" and bool(path.drive) != bool(path.root):
+        logger.warning("unsupported_log_dir", value=raw[:128])
+        return str(Path.home() / ".vectimus" / "logs")
+    if path.is_absolute():
+        return str(path)
+    base = project_path if project_path is not None else Path.home()
+    return str(base / path)
+
+
 def _default_config_path() -> Path:
     """Return the default config file path."""
     return Path.home() / ".vectimus" / "config.toml"
@@ -648,18 +675,30 @@ class VectimusConfig:
         return _safe_int(data.get("audit", {}).get("max_file_size_mb", 100), default=100, minimum=1)
 
     def get_audit_log_dir(self, project_path: Path | None = None) -> str:
-        """Return the audit log directory."""
+        """Return the audit log directory.
+
+        Relative paths are anchored at the project root (or the home
+        directory when no project is known), never the process cwd: the
+        daemon runs with cwd ``/`` and hooks run from arbitrary project
+        subdirectories, so a cwd-relative path would land somewhere
+        different on every call.
+        """
         env = os.environ.get("VECTIMUS_LOG_DIR")
         if env:
-            return env
+            return _anchor_dir(env, project_path)
         data = self.effective_config(project_path) if project_path else self._data
         default = str(Path.home() / ".vectimus" / "logs")
-        return data.get("audit", {}).get("log_dir", default)
+        raw = data.get("audit", {}).get("log_dir", default)
+        return _anchor_dir(raw, project_path)
 
     def get_log_dir(self) -> str:
-        """Return the logging directory.  Defaults to ~/.vectimus/logs."""
-        default = str(Path.home() / ".vectimus" / "logs")
-        return self._data.get("logging", {}).get("dir", default)
+        """Return the logging directory.  Defaults to ~/.vectimus/logs.
+
+        Relative paths are anchored at the home directory, never the
+        process cwd (see ``get_audit_log_dir``).
+        """
+        raw = self._data.get("logging", {}).get("dir", str(Path.home() / ".vectimus" / "logs"))
+        return _anchor_dir(raw, None)
 
     # -- Internal -----------------------------------------------------------
 
