@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-06-12
+
 ### Fixed
 
 - Relative `audit.log_dir` / `logging.dir` config values (and a relative `VECTIMUS_LOG_DIR`) now anchor at the project root (or home when no project is known) instead of the process cwd. Under the daemon the cwd is always `/` since the cwd-resilience fix, and inline hooks run from arbitrary subdirectories, so a cwd-relative path landed somewhere different on every call and audit entries could be silently lost. `~` is now expanded too.
