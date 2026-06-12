@@ -470,6 +470,16 @@ class DaemonServer:
         for key in expired_keys:
             del self._temp_disables[key]
 
+        # Surface project-key mismatches: log the lookup key and the keys
+        # actually stored, so a hook query under the wrong key is visible.
+        stored_keys = sorted({proj for (proj, _) in self._temp_disables})
+        logger.info(
+            "temp_disable_lookup",
+            lookup_key=project_path,
+            stored_keys=stored_keys,
+            active_rule_count=len(active),
+        )
+
         return active
 
     def _handle_temp_disable(self, request: dict) -> dict:

@@ -234,3 +234,144 @@ class TestLoaderExtraDisabledRules:
 
         loader = PolicyLoader(policy_dirs=[str(tmp_path)], project_path=tmp_path)
         assert loader._extra_disabled_rules == set()
+
+
+class TestFindProjectRoot:
+    """Test the project-root walker that gives temp disable a stable key (issue #42)."""
+
+    def test_returns_self_when_marker_present(self, tmp_path) -> None:
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus").mkdir()
+        (tmp_path / ".vectimus" / "config.toml").write_text("")
+        assert find_project_root(tmp_path) == tmp_path.resolve()
+
+    def test_walks_up_to_project_with_config_toml(self, tmp_path) -> None:
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus").mkdir()
+        (tmp_path / ".vectimus" / "config.toml").write_text("")
+        deep = tmp_path / "a" / "b" / "c"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_walks_up_to_project_with_keys_dir(self, tmp_path) -> None:
+        # `vectimus init` writes `.vectimus/keys/` even without config.toml --
+        # the walker must accept that as a valid project marker.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        deep = tmp_path / "src" / "feature"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_receipts_only_does_not_count(self, tmp_path) -> None:
+        # The hook auto-creates `.vectimus/receipts/` under any cwd it
+        # evaluates against.  Treating that as a project marker would make
+        # every random subdirectory the agent has touched look like its own
+        # project -- and reintroduce the issue #42 mismatch.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / "spurious" / ".vectimus" / "receipts").mkdir(parents=True)
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        spurious = tmp_path / "spurious"
+        assert find_project_root(spurious) == tmp_path.resolve()
+
+    def test_falls_back_to_start_when_no_marker(self, tmp_path) -> None:
+        # Preserves existing behaviour for users with no project-local config
+        # (e.g. running purely against bundled defaults / user-global config).
+        from vectimus.engine.config import find_project_root
+
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == deep.resolve()
+
+    def test_falls_back_to_git_root_when_no_vectimus_marker(self, tmp_path) -> None:
+        # Globally-installed hooks fire in projects that never ran
+        # `vectimus init`.  Without a `.vectimus` marker, anchor at the
+        # repository root so receipts don't sprout in every subdirectory
+        # the agent works from.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".git").mkdir()
+        deep = tmp_path / "src" / "feature"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_git_file_counts_as_git_root(self, tmp_path) -> None:
+        # Worktrees and submodules have a `.git` file, not a directory.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".git").write_text("gitdir: /somewhere/else\n")
+        deep = tmp_path / "pkg"
+        deep.mkdir()
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_vectimus_marker_beats_nearer_git_root(self, tmp_path) -> None:
+        # A vendored repo inside a vectimus project has its own `.git`.
+        # The explicit `.vectimus` marker on the outer project wins -- the
+        # marker is user intent, `.git` is a heuristic.
+        from vectimus.engine.config import find_project_root
+
+        (tmp_path / ".vectimus" / "keys").mkdir(parents=True)
+        vendored = tmp_path / "vendor" / "lib"
+        (vendored / ".git").mkdir(parents=True)
+        assert find_project_root(vendored) == tmp_path.resolve()
+
+    def test_home_directory_never_counts_as_marker(self, tmp_path, monkeypatch) -> None:
+        # ~/.vectimus/ holds the GLOBAL config and keypair, so every user
+        # has both markers at home.  Treating home as a project root would
+        # key every markerless repo under home to the same project -- a
+        # temp disable in one repo would suppress the rule in all of them.
+        from vectimus.engine.config import find_project_root
+
+        fake_home = tmp_path / "home" / "user"
+        (fake_home / ".vectimus" / "keys").mkdir(parents=True)
+        (fake_home / ".vectimus" / "config.toml").write_text("")
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))  # Windows
+
+        repo = fake_home / "code" / "myproject"
+        (repo / ".git").mkdir(parents=True)
+        deep = repo / "src" / "feature"
+        deep.mkdir(parents=True)
+
+        assert find_project_root(deep) == repo.resolve()
+
+    def test_home_exclusion_falls_back_to_start_without_git(self, tmp_path, monkeypatch) -> None:
+        # No marker below home and no .git: fall back to the start path,
+        # never to home itself.
+        from vectimus.engine.config import find_project_root
+
+        fake_home = tmp_path / "home" / "user"
+        (fake_home / ".vectimus" / "keys").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))
+
+        deep = fake_home / "scratch" / "notes"
+        deep.mkdir(parents=True)
+
+        assert find_project_root(deep) == deep.resolve()
+
+    def test_symlinked_cwd_still_finds_lexical_project_root(self, tmp_path) -> None:
+        # A symlink inside the project that points outside it must not
+        # cause the walk to leave the project tree (same evasion class as
+        # issue #38).  The lexical path is walked first; resolving up
+        # front would translate `repo/work/sub` to `elsewhere/work/sub`
+        # and skip repo/.vectimus entirely.
+        import sys
+
+        import pytest
+
+        from vectimus.engine.config import find_project_root
+
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires privileges on Windows")
+
+        repo = tmp_path / "repo"
+        (repo / ".vectimus" / "keys").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere" / "work"
+        (elsewhere / "sub").mkdir(parents=True)
+        (repo / "work").symlink_to(elsewhere)
+
+        assert find_project_root(repo / "work" / "sub") == repo.resolve()

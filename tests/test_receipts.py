@@ -384,6 +384,59 @@ class TestReceiptStorage:
         loaded = json.loads(files[0].read_text())
         assert loaded["receipt_id"] == receipt["receipt_id"]
 
+    def test_write_creates_self_gitignore_in_vectimus_dir(self, tmp_path):
+        # The hook auto-creates `.vectimus/receipts/` in projects that never
+        # ran `vectimus init`, so nothing has gitignored it.  The writer must
+        # drop a self-ignore inside `.vectimus/` covering only receipts --
+        # keys and config stay committable.
+        receipt = _golden_receipt_data()
+        receipt["fingerprint"] = compute_fingerprint(receipt)
+        receipt["timestamp"] = "2026-03-21T14:32:01.847Z"
+        receipts_dir = tmp_path / ".vectimus" / "receipts"
+
+        _write_receipt_sync(receipt, receipts_dir)
+
+        gitignore = tmp_path / ".vectimus" / ".gitignore"
+        assert gitignore.read_text() == "receipts/\n"
+
+    def test_write_appends_receipts_to_existing_gitignore(self, tmp_path):
+        # A hand-crafted .vectimus/.gitignore without a receipts/ line
+        # would leave receipts committable -- the writer must append,
+        # preserving the existing content.
+        receipt = _golden_receipt_data()
+        receipt["fingerprint"] = compute_fingerprint(receipt)
+        receipt["timestamp"] = "2026-03-21T14:32:01.847Z"
+        receipts_dir = tmp_path / ".vectimus" / "receipts"
+        receipts_dir.parent.mkdir(parents=True)
+        (receipts_dir.parent / ".gitignore").write_text("# custom\n")
+
+        _write_receipt_sync(receipt, receipts_dir)
+
+        assert (receipts_dir.parent / ".gitignore").read_text() == "# custom\nreceipts/\n"
+
+    def test_write_leaves_gitignore_alone_when_receipts_already_ignored(self, tmp_path):
+        receipt = _golden_receipt_data()
+        receipt["fingerprint"] = compute_fingerprint(receipt)
+        receipt["timestamp"] = "2026-03-21T14:32:01.847Z"
+        receipts_dir = tmp_path / ".vectimus" / "receipts"
+        receipts_dir.parent.mkdir(parents=True)
+        (receipts_dir.parent / ".gitignore").write_text("# custom\nreceipts/\n")
+
+        _write_receipt_sync(receipt, receipts_dir)
+
+        assert (receipts_dir.parent / ".gitignore").read_text() == "# custom\nreceipts/\n"
+
+    def test_write_skips_gitignore_outside_vectimus_dir(self, tmp_path):
+        # Receipts written to a bare directory (tests, custom tooling) must
+        # not scatter .gitignore files around.
+        receipt = _golden_receipt_data()
+        receipt["fingerprint"] = compute_fingerprint(receipt)
+        receipt["timestamp"] = "2026-03-21T14:32:01.847Z"
+
+        _write_receipt_sync(receipt, tmp_path)
+
+        assert not (tmp_path.parent / ".gitignore").exists()
+
     def test_retention_cleanup(self, tmp_path):
         # Create directories with old dates
         old_dir = tmp_path / "2025-01-01"
