@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Daemon no longer breaks every project when the directory it was started from is deleted. The auto-started daemon inherited the hook's cwd (e.g. an ephemeral Claude Code worktree); once that directory was removed, the eager `os.getcwd()` fallback raised `FileNotFoundError` on every request and all tool calls in all projects were denied with `Daemon error (fail closed)` until a manual restart. The daemon now does `os.chdir("/")` at startup, auto-start spawns it with `cwd="/"`, and the per-request cwd fallback is lazy.
+- Hook client self-heals a broken daemon instead of silently falling back to inline evaluation forever: a daemon that is alive but not answering on its socket is stopped and replaced, a stale socket nobody answers on triggers an auto-start plus a single retry, and internal daemon failures (marked with a new `daemon_error` response field) fall back to inline evaluation while the daemon is replaced in the background. Restarts are serialized through a start lock so concurrent hooks cannot fight over the daemon, PIDs are verified to belong to a vectimus process before any signal is sent (PID-reuse guard), daemon readiness is probed with a real socket connect rather than a file-existence check, and a replaced daemon exiting late no longer deletes its successor's socket and PID files.
+
 ## [0.22.0] - 2026-05-03
 
 ### Added

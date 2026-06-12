@@ -76,6 +76,16 @@ class DaemonServer:
 
     async def start(self) -> None:
         """Start the daemon server."""
+        # Detach from the spawning directory.  The daemon is auto-started
+        # by hook processes and inherits their cwd, which may be an
+        # ephemeral directory (e.g. a Claude Code worktree).  If that
+        # directory is later deleted, os.getcwd() raises FileNotFoundError
+        # and every request fails closed until the daemon is restarted.
+        try:
+            os.chdir("/")
+        except OSError:
+            pass
+
         if _IS_WINDOWS:
             await self._start_tcp()
         else:
@@ -241,8 +251,11 @@ class DaemonServer:
 
             response = await asyncio.to_thread(self._evaluate, request)
 
-            # Schedule receipt cleanup on first request per project
-            cwd = request.get("cwd", os.getcwd())
+            # Schedule receipt cleanup on first request per project.
+            # Lazy fallback: request.get("cwd", os.getcwd()) would call
+            # os.getcwd() eagerly and crash the request if the daemon's
+            # cwd has been deleted.
+            cwd = request.get("cwd") or os.getcwd()
             project_path = Path(cwd).resolve()
             if project_path not in self._cleaned_projects:
                 self._cleaned_projects.add(project_path)
@@ -253,7 +266,10 @@ class DaemonServer:
             writer.write(json.dumps(response).encode() + b"\n")
             await writer.drain()
         except Exception as exc:
-            # Fail closed — deny on unexpected errors, consistent with inline path
+            # Fail closed — deny on unexpected errors, consistent with inline path.
+            # daemon_error marks this as an internal daemon failure (not a
+            # policy decision) so the client can fall back to inline
+            # evaluation and replace the broken daemon.
             try:
                 error_resp = {
                     "decision": "deny",
@@ -261,6 +277,7 @@ class DaemonServer:
                     "matched_policy_ids": [],
                     "receipt_id": None,
                     "evaluation_time_ms": 0,
+                    "daemon_error": True,
                 }
                 writer.write(json.dumps(error_resp).encode() + b"\n")
                 await writer.drain()
@@ -277,7 +294,7 @@ class DaemonServer:
         """Run policy evaluation synchronously (called via to_thread)."""
         source = request.get("source", "claude-code")
         payload = request.get("payload", {})
-        cwd = request.get("cwd", os.getcwd())
+        cwd = request.get("cwd") or os.getcwd()
         project_path = Path(cwd).resolve()
 
         try:
@@ -590,10 +607,27 @@ class DaemonServer:
                 return
 
     async def shutdown(self) -> None:
-        """Clean shutdown: close server, remove socket/info files."""
+        """Clean shutdown: close server, remove socket/info files.
+
+        Only removes the on-disk daemon info if this process still owns
+        it.  A daemon that was replaced (e.g. by the client's self-heal)
+        must not delete its successor's socket and PID files on the way
+        out.
+        """
         if self._server:
             self._server.close()
             await self._server.wait_closed()
 
-        remove_daemon_info()
+        if self._owns_daemon_info():
+            remove_daemon_info()
         logger.info("daemon_stopped")
+
+    @staticmethod
+    def _owns_daemon_info() -> bool:
+        try:
+            if _IS_WINDOWS:
+                info = read_daemon_info()
+                return bool(info) and info.get("pid") == os.getpid()
+            return int(PID_PATH.read_text().strip()) == os.getpid()
+        except (FileNotFoundError, ValueError, OSError):
+            return False
