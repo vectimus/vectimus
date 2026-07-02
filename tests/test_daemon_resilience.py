@@ -499,3 +499,48 @@ class TestClientAutoRestart:
 
         result = daemon_client.daemon_evaluate("claude-code", {}, "/some/project")
         assert result == {"decision": "deny", "reason": "policy"}
+
+
+class TestControlMessageAutoStartsColdDaemon:
+    """Regression: ``vectimus rule disable`` crashed with ``KeyError: 'pid'``
+    when no daemon was running.  The control-message path fed an empty dict
+    to ``is_daemon_alive``, which indexed ``info["pid"]`` unconditionally."""
+
+    def test_is_daemon_alive_tolerates_missing_pid(self) -> None:
+        assert daemon_info.is_daemon_alive({}) is False
+        assert daemon_info.is_daemon_alive({"port": 1}) is False
+
+    def test_temp_disable_auto_starts_when_daemon_not_running(
+        self, monkeypatch, fake_paths
+    ) -> None:
+        """No PID file, no socket: temp_disable must auto-start the daemon
+        rather than raise on the liveness check."""
+        sock, _pid_file = fake_paths  # neither exists yet
+
+        started = {"value": False}
+
+        def fake_auto_start() -> bool:
+            started["value"] = True
+            # Once "started", stand up a real listener so the send succeeds.
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(sock))
+            listener.listen(1)
+
+            def serve() -> None:
+                conn, _ = listener.accept()
+                conn.recv(8192)
+                conn.sendall(b'{"status": "ok"}\n')
+                conn.close()
+                listener.close()
+
+            import threading
+
+            threading.Thread(target=serve, daemon=True).start()
+            return True
+
+        monkeypatch.setattr(daemon_client, "_try_auto_start", fake_auto_start)
+
+        resp = daemon_client.daemon_temp_disable("vectimus-fileint-001", "/some/project", 600.0)
+
+        assert started["value"] is True
+        assert resp == {"status": "ok"}

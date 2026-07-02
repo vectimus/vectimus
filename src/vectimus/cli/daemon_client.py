@@ -203,7 +203,7 @@ def _send_control_message(message: dict, *, auto_start: bool = False) -> dict | 
 
     If *auto_start* is True and the daemon is not running, starts it first.
     """
-    alive = is_daemon_alive(read_daemon_info() or {})
+    alive = is_daemon_alive(read_daemon_info())
 
     if not alive:
         if auto_start:
@@ -245,7 +245,7 @@ def _send_control_message(message: dict, *, auto_start: bool = False) -> dict | 
 
 def daemon_reload() -> bool:
     """Send a reload request to the daemon.  Returns True if successful."""
-    if not is_daemon_alive(read_daemon_info() or {}):
+    if not is_daemon_alive(read_daemon_info()):
         return False
 
     try:
