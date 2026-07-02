@@ -101,7 +101,9 @@ def is_daemon_alive(info: dict | None = None) -> bool:
         info = read_daemon_info()
     if info is None:
         return False
-    pid = info["pid"]
+    pid = info.get("pid")
+    if pid is None:
+        return False
     if _IS_WINDOWS:
         import ctypes
         import ctypes.wintypes

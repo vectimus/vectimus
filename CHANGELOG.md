@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `vectimus rule disable --for` (and any control command) no longer crashes with `KeyError: 'pid'` when the daemon is not running. The liveness check was handed an empty dict and indexed `info["pid"]` unconditionally, aborting before auto-start could run. `is_daemon_alive` now treats a pid-less info dict as "not alive", so the cold-start path spawns the daemon as intended.
+
 ## [0.22.1] - 2026-06-12
 
 ### Fixed
