@@ -63,8 +63,10 @@ def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], li
     ordered_ids: list[str] = []
 
     # Match each policy block: annotations followed by forbid/permit.
+    # Whitespace is consumed by a single separator between annotations so the
+    # quantified group has no overlapping \s* on both ends (avoids ReDoS).
     pattern = re.compile(
-        r'((?:\s*@\w+\("[^"]*"\)\s*)+)\s*(?:forbid|permit)\s*\(',
+        r'(@\w+\("[^"]*"\)(?:\s+@\w+\("[^"]*"\))*)\s*(?:forbid|permit)\s*\(',
         re.MULTILINE,
     )
 
