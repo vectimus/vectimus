@@ -8,7 +8,12 @@ Contributions are welcome. This guide covers the basics.
 git clone https://github.com/vectimus/vectimus.git
 cd vectimus
 uv pip install -e ".[dev]"
+./scripts/install-hooks.sh   # one-time: keeps policies/ in sync with canonical
 ```
+
+The `install-hooks.sh` step points `core.hooksPath` at the repo-tracked `hooks/` directory.  Once installed, every `git pull` triggers `scripts/sync-policies.sh` which refreshes the vendored `policies/` tree from canonical [vectimus/policies@main](https://github.com/vectimus/policies).  Skip on a per-pull basis with `VECTIMUS_SKIP_POLICY_SYNC=1 git pull`, or run the sync manually any time with `./scripts/sync-policies.sh`.
+
+If you keep a sibling clone of `vectimus/policies` at `../policies`, the script uses that and runs `git pull` on it; otherwise it shallow-clones canonical to a temp directory.
 
 ## Development workflow
 
