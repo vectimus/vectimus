@@ -18,6 +18,7 @@ import cedarpy
 import structlog
 
 from vectimus.engine.models import ActionType, Decision, DecisionVerdict, VectimusEvent
+from vectimus.engine.normaliser import _refine_shell_action
 from vectimus.engine.schemas import CEDAR_SCHEMA_JSON
 
 if TYPE_CHECKING:
@@ -166,6 +167,17 @@ class PolicyEngine:
         start = time.perf_counter()
         try:
             decision = self._evaluate_cedar(event)
+
+            # Chain evaluation: split compound commands (&&, ||, ;) and
+            # evaluate each segment with its own action type.  Catches
+            # dangerous commands hidden after benign prefixes.
+            if decision.decision == DecisionVerdict.ALLOW:
+                chain_decision = self._evaluate_chain_segments(event)
+                if chain_decision and chain_decision.decision in (
+                    DecisionVerdict.DENY,
+                    DecisionVerdict.ESCALATE,
+                ):
+                    decision = chain_decision
 
             # Double evaluation: inspect file/script content against
             # shell_command policies when the primary evaluation allows.
@@ -346,6 +358,81 @@ class PolicyEngine:
                 break
 
         return self._apply_enforcement(matched_ids, reason_text, suggested_alt)
+
+    # Splits on &&, ||, ; but not inside quotes.
+    _CHAIN_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;)\s*")
+
+    def _evaluate_chain_segments(self, event: VectimusEvent) -> Decision | None:
+        """Split compound commands and evaluate each segment independently.
+
+        Returns a DENY/ESCALATE Decision if any segment triggers a policy,
+        or None if all segments pass.
+        """
+        command = event.action.command
+        if not command:
+            return None
+
+        segments = self._CHAIN_SPLIT_RE.split(command)
+        if len(segments) <= 1:
+            return None
+
+        for segment in segments[1:]:
+            segment = segment.strip()
+            if not segment:
+                continue
+            action_type, _ = _refine_shell_action(segment)
+
+            principal_type = (
+                "Vectimus::Agent"
+                if event.identity.identity_type == "agent"
+                else "Vectimus::User"
+            )
+            context: dict[str, str] = {"command": segment}
+            if event.context.cwd:
+                context["cwd"] = event.context.cwd
+
+            request = {
+                "principal": f'{principal_type}::"{event.identity.principal}"',
+                "action": f'Vectimus::Action::"{action_type}"',
+                "resource": f'Vectimus::Tool::"{event.action.raw_tool_name}"',
+                "context": context,
+            }
+            entities = self._build_cedar_entities(event)
+
+            result = cedarpy.is_authorized(
+                request=request,
+                policies=self._policies_text,
+                entities=entities,
+            )
+
+            if result.decision == cedarpy.Decision.Allow:
+                continue
+
+            reasons = result.diagnostics.reasons if result.diagnostics else []
+            if not reasons:
+                continue
+
+            matched_ids: list[str] = []
+            for reason in reasons:
+                real_id = self._policy_index.get(reason, reason)
+                matched_ids.append(real_id)
+
+            reason_text = f"Denied by Cedar policy: {', '.join(matched_ids)}"
+            suggested_alt: str | None = None
+
+            for pid in matched_ids:
+                meta = self._policy_metadata.get(pid)
+                if meta:
+                    reason_text = (
+                        f"Blocked by policy {pid} (via chain inspection): {meta.description}"
+                    )
+                    if meta.suggested_alternative:
+                        suggested_alt = meta.suggested_alternative
+                    break
+
+            return self._apply_enforcement(matched_ids, reason_text, suggested_alt)
+
+        return None
 
     def _resolve_enforcement(self, policy_id: str) -> str:
         """Resolve the effective enforcement level for a policy.
