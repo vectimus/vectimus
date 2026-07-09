@@ -321,8 +321,11 @@ def rule_show(rule_id: str, config_path: str | None, policy_dir: str | None) -> 
 @click.option(
     "--level",
     required=False,
-    type=click.Choice(["deny", "escalate", "observe"], case_sensitive=False),
-    help="Enforcement level: deny (hard block), escalate (ask user), observe (log only).",
+    type=click.Choice(["deny", "escalate", "observe", "challenge"], case_sensitive=False),
+    help=(
+        "Enforcement level: deny (hard block), challenge (deny first, ask on "
+        "identical retry), escalate (flag/escalate), observe (log only)."
+    ),
 )
 @click.option("--config", "config_path", default=None, help="Path to config.toml.")
 @click.option("--policy-dir", default=None, help="Policy directory to scan.")
@@ -339,7 +342,8 @@ def rule_enforce(
     """Override the enforcement level for a rule.
 
     Changes how a matched rule responds: deny (hard block),
-    escalate (ask the user) or observe (log only, allow through).
+    challenge (deny first, ask on identical retry), escalate (flag/escalate),
+    or observe (log only, allow through).
     Use --clear to remove the override and revert to the policy annotation.
     """
     dirs = [policy_dir] if policy_dir else None

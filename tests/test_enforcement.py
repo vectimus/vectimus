@@ -48,6 +48,16 @@ class TestEnforcementAnnotationParsing:
         metadata, _ = _parse_policy_metadata(cedar)
         assert metadata["test-003"].enforcement == "observe"
 
+    def test_parse_enforcement_challenge(self):
+        cedar = textwrap.dedent("""\
+            @id("test-auto")
+            @description("test rule")
+            @enforcement("challenge")
+            forbid (principal, action, resource) when { true };
+        """)
+        metadata, _ = _parse_policy_metadata(cedar)
+        assert metadata["test-auto"].enforcement == "challenge"
+
     def test_parse_enforcement_default_is_deny(self):
         """Rules without @enforcement default to deny."""
         cedar = textwrap.dedent("""\
@@ -124,6 +134,19 @@ _DENY_POLICY = textwrap.dedent("""\
     };
 """)
 
+_CHALLENGE_POLICY = textwrap.dedent("""\
+    @id("auto-001")
+    @description("Challenge echo auto-test")
+    @enforcement("challenge")
+    forbid (
+        principal,
+        action == Vectimus::Action::"shell_command",
+        resource
+    ) when {
+        context.command like "*echo auto-test*"
+    };
+""")
+
 
 class TestEnforcementEvaluation:
     """PolicyEngine produces the correct verdict based on enforcement level."""
@@ -144,6 +167,12 @@ class TestEnforcementEvaluation:
     def deny_engine(self, tmp_path):
         policy_file = tmp_path / "test.cedar"
         policy_file.write_text(_DENY_POLICY)
+        return PolicyEngine(policy_dir=str(tmp_path))
+
+    @pytest.fixture()
+    def challenge_engine(self, tmp_path):
+        policy_file = tmp_path / "test.cedar"
+        policy_file.write_text(_CHALLENGE_POLICY)
         return PolicyEngine(policy_dir=str(tmp_path))
 
     def test_escalate_produces_escalate_verdict(self, escalate_engine, make_event):
@@ -169,6 +198,12 @@ class TestEnforcementEvaluation:
         decision = deny_engine.evaluate(event)
         assert decision.decision == DecisionVerdict.DENY
         assert "deny-001" in decision.matched_policy_ids
+
+    def test_challenge_produces_challenge_verdict(self, challenge_engine, make_event):
+        event = make_event(command="echo auto-test")
+        decision = challenge_engine.evaluate(event)
+        assert decision.decision == DecisionVerdict.CHALLENGE
+        assert "auto-001" in decision.matched_policy_ids
 
     def test_strictest_enforcement_wins(self, tmp_path, make_event):
         """When multiple policies match, the strictest enforcement wins."""
@@ -244,6 +279,16 @@ class TestEnforcementConfigOverrides:
         project.mkdir()
         config.set_enforcement_override("test-001", "observe", project)
         assert config.get_enforcement_override("test-001", project) == "observe"
+
+    def test_set_and_get_challenge_override(self, tmp_path):
+        from vectimus.engine.config import VectimusConfig
+
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("")
+        config = VectimusConfig(str(config_path))
+
+        config.set_enforcement_override("test-001", "challenge")
+        assert config.get_enforcement_override("test-001") == "challenge"
 
     def test_project_override_wins_over_global(self, tmp_path):
         from vectimus.engine.config import VectimusConfig

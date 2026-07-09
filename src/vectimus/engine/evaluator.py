@@ -94,7 +94,7 @@ def _parse_policy_metadata(policy_text: str) -> tuple[dict[str, _PolicyMeta], li
             elif key == "controls":
                 controls = value
             elif key == "enforcement":
-                if value in ("deny", "escalate", "observe"):
+                if value in ("deny", "escalate", "observe", "challenge"):
                     enforcement = value
 
         ordered_ids.append(policy_id)
@@ -179,7 +179,11 @@ class PolicyEngine:
                         if not line:
                             continue
                         content_decision = self._evaluate_content(event, line)
-                        if content_decision.decision == DecisionVerdict.DENY:
+                        if content_decision.decision in (
+                            DecisionVerdict.DENY,
+                            DecisionVerdict.ESCALATE,
+                            DecisionVerdict.CHALLENGE,
+                        ):
                             decision = content_decision
                             break
 
@@ -196,6 +200,7 @@ class PolicyEngine:
         if self._observe and decision.decision in (
             DecisionVerdict.DENY,
             DecisionVerdict.ESCALATE,
+            DecisionVerdict.CHALLENGE,
         ):
             logger.info(
                 "observe_mode_would_deny",
@@ -366,7 +371,7 @@ class PolicyEngine:
             return meta.enforcement
         return "deny"
 
-    _ENFORCEMENT_PRIORITY = {"observe": 0, "escalate": 1, "deny": 2}
+    _ENFORCEMENT_PRIORITY = {"observe": 0, "challenge": 1, "escalate": 2, "deny": 3}
 
     def _apply_enforcement(
         self,
@@ -392,6 +397,14 @@ class PolicyEngine:
             return Decision(
                 decision=DecisionVerdict.ALLOW,
                 reason=f"[observe] {reason_text}",
+                suggested_alternative=suggested_alt,
+                matched_policy_ids=matched_ids,
+            )
+
+        if enforcement == "challenge":
+            return Decision(
+                decision=DecisionVerdict.CHALLENGE,
+                reason=reason_text,
                 suggested_alternative=suggested_alt,
                 matched_policy_ids=matched_ids,
             )

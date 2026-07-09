@@ -108,7 +108,9 @@ def parse_rules_from_cedar(
 
         raw_enforcement = annotations.get("enforcement", "deny")
         enforcement = (
-            raw_enforcement if raw_enforcement in ("deny", "escalate", "observe") else "deny"
+            raw_enforcement
+            if raw_enforcement in ("deny", "escalate", "observe", "challenge")
+            else "deny"
         )
 
         rules.append(

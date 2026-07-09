@@ -34,6 +34,15 @@ class TestConfigDefaults:
         assert cfg.disabled_rules() == []
 
 
+class TestAutoBlockEnforcementConfig:
+    """challenge is a valid per-rule enforcement level."""
+
+    def test_set_and_get_challenge_override(self, config_path: str) -> None:
+        cfg = VectimusConfig(config_path)
+        cfg.set_enforcement_override("base-001", "challenge")
+        assert cfg.get_enforcement_override("base-001") == "challenge"
+
+
 class TestPackManagement:
     """Pack enable/disable writes to disk."""
 
