@@ -27,7 +27,7 @@ jobs:
             --exclude='LICENSE' --exclude='README.md' \
             --exclude='SECURITY.md' --exclude='VERSION' \
             policies-canonical/ policies/
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install build tools
