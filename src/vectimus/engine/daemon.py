@@ -292,10 +292,22 @@ class DaemonServer:
 
     def _evaluate(self, request: dict) -> dict:
         """Run policy evaluation synchronously (called via to_thread)."""
-        source = request.get("source", "claude-code")
+        source = request.get("source")
         payload = request.get("payload", {})
         cwd = request.get("cwd") or os.getcwd()
         project_path = Path(cwd).resolve()
+
+        # Never guess the source: normalisation is source-specific, so a
+        # missing one would silently evaluate the payload under the wrong
+        # adapter's assumptions.
+        if not isinstance(source, str) or not source:
+            return {
+                "decision": "deny",
+                "reason": "Missing source (fail closed)",
+                "matched_policy_ids": [],
+                "receipt_id": None,
+                "evaluation_time_ms": 0,
+            }
 
         try:
             event = normalise(payload, source)

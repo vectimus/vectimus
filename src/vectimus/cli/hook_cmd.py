@@ -26,8 +26,20 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import Decision, DecisionVerdict, VectimusEvent
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex")
+VALID_SOURCES = (
+    "claude-code",
+    "claude-agent-sdk",
+    "cursor",
+    "copilot",
+    "gemini-cli",
+    "codex",
+)
 _HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
+
+# Every evaluation path (server, daemon, inline) allows on an explicit ALLOW and
+# nothing else.  A missing, malformed or unknown verdict means the evaluation
+# cannot be trusted, so it denies rather than falling through.
+_UNRECOGNISED_VERDICT_REASON = "Vectimus: unrecognised policy verdict (fail closed)"
 
 
 def _log_stderr(msg: str) -> None:
@@ -270,7 +282,7 @@ def hook_cmd(source: str) -> None:
     if server_url:
         result = _post_to_server(payload, server_url, source)
         if result is not None:
-            decision_val = result.get("decision", "deny")
+            decision_val = result.get("decision")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
                 if hook_output is None or source not in _HOOK_WRAPPER_SOURCES:
@@ -283,7 +295,12 @@ def hook_cmd(source: str) -> None:
                 if source == "cursor":
                     sys.exit(2)
                 sys.exit(0)
-            sys.exit(0)
+            if decision_val == DecisionVerdict.ALLOW:
+                sys.exit(0)
+            # Anything else — missing, misspelled, wrong type, a verdict from a
+            # newer server this client does not understand — is not an allow.
+            _log_stderr(f"unrecognised server decision {decision_val!r} (fail closed)")
+            _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
 
     # Try daemon first (eliminates ~200ms Python startup on repeat calls).
     from vectimus.cli.daemon_client import daemon_evaluate
@@ -295,7 +312,7 @@ def hook_cmd(source: str) -> None:
         if debug:
             _log_stderr(f"daemon decision={daemon_result.get('decision')}")
 
-        verdict = daemon_result.get("decision", "allow")
+        verdict = daemon_result.get("decision")
         receipt_id = daemon_result.get("receipt_id")
 
         if verdict == DecisionVerdict.ESCALATE:
@@ -314,8 +331,13 @@ def hook_cmd(source: str) -> None:
             _log_stderr_overrides(matched)
             _emit_deny(source, payload, reason)
 
-        # ALLOW — exit cleanly
-        sys.exit(0)
+        if verdict == DecisionVerdict.ALLOW:
+            sys.exit(0)
+
+        # Only an explicit allow allows.  A daemon that answers with a missing
+        # or unrecognised verdict is not trusted to have evaluated anything.
+        _log_stderr(f"unrecognised daemon decision {verdict!r} (fail closed)")
+        _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
 
     # Inline fallback (daemon unavailable)
     if debug:
@@ -405,6 +427,10 @@ def hook_cmd(source: str) -> None:
             reason += f" (receipt: {receipt_id[:13]})"
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason)
+
+    if decision.decision != DecisionVerdict.ALLOW:
+        _log_stderr(f"unrecognised inline decision {decision.decision!r} (fail closed)")
+        _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
 
     # Background policy update check (non-blocking, never breaks hook).
     # Only runs when auto_sync is explicitly enabled in config.
