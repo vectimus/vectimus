@@ -33,8 +33,14 @@ VALID_SOURCES = (
     "copilot",
     "gemini-cli",
     "codex",
+    "opencode",
 )
 _HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
+
+# Sources whose deny payload is the flat {"decision", "reason"} shape.  For
+# OpenCode the consumer is the Vectimus plugin itself, which turns any stdout
+# at all into a thrown error -- OpenCode has no native deny JSON.
+_SIMPLE_DENY_SOURCES = ("gemini-cli", "opencode")
 
 # Every evaluation path (server, daemon, inline) allows on an explicit ALLOW and
 # nothing else.  A missing, malformed or unknown verdict means the evaluation
@@ -96,7 +102,7 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": reason,
             "agent_message": reason,
         }
-    if source == "gemini-cli":
+    if source in _SIMPLE_DENY_SOURCES:
         return {
             "decision": "deny",
             "reason": reason,
@@ -137,7 +143,7 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": escalate_reason,
             "agent_message": agent_reason,
         }
-    if source == "gemini-cli":
+    if source in _SIMPLE_DENY_SOURCES:
         return {
             "decision": "deny",
             "reason": agent_reason,
@@ -242,6 +248,7 @@ def hook_cmd(source: str) -> None:
       echo '{"tool_name":"Bash",...}' | vectimus hook --source claude-code
       echo '{"command":"rm -rf /"}' | vectimus hook --source cursor
       echo '{"tool_name":"Bash",...}' | vectimus hook --source codex
+      echo '{"tool_name":"bash",...}' | vectimus hook --source opencode
     """
     # Redirect structlog to stderr so stdout stays clean for JSON responses.
     # AI tools parse stdout for hook decisions; stray log lines break parsing.
