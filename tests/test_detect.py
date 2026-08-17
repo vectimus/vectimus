@@ -208,13 +208,11 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._cursor_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
         report = detect_all()
-        assert len(report.results) == 5
-        assert ToolName.CLAUDE_CODE in report.results
-        assert ToolName.CURSOR in report.results
-        assert ToolName.COPILOT in report.results
-        assert ToolName.GEMINI_CLI in report.results
-        assert ToolName.CODEX in report.results
+        assert len(report.results) == len(ToolName)
+        for tool in ToolName:
+            assert tool in report.results
 
     def test_tools_found_property(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -237,8 +235,9 @@ class TestDetectAll:
         monkeypatch.setattr("vectimus.cli.detect._cursor_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._vscode_known_locations", lambda: [])
         monkeypatch.setattr("vectimus.cli.detect._check_linux_appimage", lambda app: None)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
         report = detect_all()
-        assert len(report.tools_not_found) == 5
+        assert len(report.tools_not_found) == len(ToolName)
 
     def test_platform_is_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(shutil, "which", lambda name: None)

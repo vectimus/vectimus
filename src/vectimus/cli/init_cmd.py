@@ -17,16 +17,20 @@ from vectimus.cli.detect import (
     tool_runtime_supported,
 )
 from vectimus.cli.mcp_discover import discover_mcp_servers
+from vectimus.cli.opencode_plugin import global_plugin_path
 from vectimus.engine.config import VectimusConfig
 from vectimus.engine.loader import PolicyLoader
 
-# Maps tool names to display labels and configure functions.
+# Maps tool names to display labels and to what a successful configure writes.
+# OpenCode is the odd one out: it has no hooks config to merge into, so
+# Vectimus installs a plugin file instead.
 _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
-    ToolName.CLAUDE_CODE: ("Claude Code / Agent SDK", "_configure_claude_code"),
-    ToolName.CURSOR: ("Cursor", "_configure_cursor"),
-    ToolName.COPILOT: ("VS Code / Copilot", "_configure_copilot"),
-    ToolName.GEMINI_CLI: ("Gemini CLI", "_configure_gemini_cli"),
-    ToolName.CODEX: ("Codex CLI", "_configure_codex_cli"),
+    ToolName.CLAUDE_CODE: ("Claude Code / Agent SDK", "hook config written"),
+    ToolName.CURSOR: ("Cursor", "hook config written"),
+    ToolName.COPILOT: ("VS Code / Copilot", "hook config written"),
+    ToolName.GEMINI_CLI: ("Gemini CLI", "hook config written"),
+    ToolName.CODEX: ("Codex CLI", "hook config written"),
+    ToolName.OPENCODE: ("OpenCode", "plugin installed"),
 }
 
 
@@ -48,6 +52,14 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     help="Auto-allow all discovered MCP servers without prompting.",
 )
 @click.option(
+    "--project",
+    "project_scope",
+    is_flag=True,
+    default=False,
+    help="Install the OpenCode plugin into ./.opencode/plugin/ instead of the "
+    "user-level OpenCode config directory.",
+)
+@click.option(
     "--ci",
     is_flag=True,
     default=False,
@@ -58,6 +70,7 @@ def init_cmd(
     server_url: str | None,
     policy_dir: str | None,
     allow_mcp: bool,
+    project_scope: bool,
     ci: bool,
 ) -> None:
     """Detect installed AI tools and generate Vectimus hook configurations."""
@@ -68,6 +81,7 @@ def init_cmd(
         ToolName.COPILOT: _configure_copilot,
         ToolName.GEMINI_CLI: _configure_gemini_cli,
         ToolName.CODEX: _configure_codex_cli,
+        ToolName.OPENCODE: lambda: _configure_opencode(project=project_scope),
     }
 
     report = detect_all()
@@ -75,7 +89,7 @@ def init_cmd(
 
     click.echo("Tool detection:")
     for tool_name in ToolName:
-        display_name, _ = _TOOL_CONFIG[tool_name]
+        display_name, artefact = _TOOL_CONFIG[tool_name]
         result = report.results.get(tool_name)
 
         if result and result.found:
@@ -85,10 +99,12 @@ def init_cmd(
                 if result.executable_path:
                     click.echo(f"      {result.executable_path}")
                 continue
-            configure_fns[tool_name]()
-            tools_configured.append(tool_name.value)
             method_label = f"({result.method.value})" if result.method else ""
-            click.echo(f"  [+] {display_name:<18} {method_label:<8} hook config written")
+            if configure_fns[tool_name]() is False:
+                click.echo(f"  [ ] {display_name:<18} {method_label:<8} not configured")
+                continue
+            tools_configured.append(tool_name.value)
+            click.echo(f"  [+] {display_name:<18} {method_label:<8} {artefact}")
             if result.executable_path:
                 click.echo(f"      {result.executable_path}")
             if tool_name == ToolName.COPILOT and result.has_copilot_extension:
@@ -393,9 +409,8 @@ def _configure_gemini_cli() -> None:
 
 def _is_vectimus_codex_hook(hook: dict) -> bool:
     """Check if a Codex hook definition was created by Vectimus."""
-    return (
-        hook.get("type") == "command"
-        and _command_references_vectimus_source(hook.get("command", ""), "codex")
+    return hook.get("type") == "command" and _command_references_vectimus_source(
+        hook.get("command", ""), "codex"
     )
 
 
@@ -513,6 +528,26 @@ def _configure_codex_cli() -> None:
         )
 
     _enable_codex_hooks_feature(config_path)
+
+
+def _configure_opencode(*, project: bool = False) -> bool:
+    """Install the Vectimus OpenCode plugin.  Returns whether it is in place.
+
+    Installs to the user-level OpenCode config directory by default so every
+    project is covered; ``--project`` puts it in ``./.opencode/plugin/``
+    instead.  Both can exist at once -- OpenCode's config directories are a
+    union, not a fallback chain, so both plugins load and both run, which is
+    redundant but not harmful (the second check sees the same verdict).
+    """
+    from vectimus.cli.opencode_plugin import install_plugin, project_plugin_path
+
+    path = project_plugin_path() if project else global_plugin_path()
+    result = install_plugin(path)
+    if not result.ok:
+        click.echo(f"      {result.message}", err=True)
+        return False
+    click.echo(f"      {path} ({result.message})")
+    return True
 
 
 def _prompt_mcp_servers(
