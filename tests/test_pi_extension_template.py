@@ -41,6 +41,10 @@ pytestmark = pytest.mark.skipif(
 # nothing.
 _BLOCK_ON_DENY = "return { block: true, reason: `Blocked by Vectimus: ${reason}` }"
 
+# The line that requires the allow acknowledgement.  Pinned for the same
+# reason: the no-acknowledgement revert check must mutate something real.
+_ACK_REQUIREMENT = "if (ack !== ALLOW_ACK) {"
+
 # Stands in for Pi: collects the `tool_call` handler the extension registers,
 # calls it with one event, and prints the outcome.  The event is overridable so
 # a test can check what the extension makes of a relative path.
@@ -266,6 +270,56 @@ def test_a_check_that_exits_without_reading_the_call_blocks(harness: _Harness) -
     output = harness.run(event=event)
     assert output.startswith("BLOCKED:"), output
     assert "did not read the tool call" in output
+
+
+def test_a_normal_sized_call_whose_check_never_reads_still_blocks(harness: _Harness) -> None:
+    """A replaced `vectimus` must fall closed on an ordinary payload too.
+
+    Before the allow acknowledgement, a check that ignored stdin sailed
+    through on any payload that fit the OS pipe buffer: the write completed,
+    stdout was empty, the exit was 0 -- byte-for-byte an allow -- and only an
+    oversized input tripped EPIPE.  So a shim (`/usr/bin/true`, a wrapper that
+    never reads the call) allowed every normal-sized tool call.  The missing
+    acknowledgement now blocks it at any size.
+    """
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    event = {
+        "type": "tool_call",
+        "toolName": "bash",
+        "toolCallId": "call_7",
+        "input": {"command": "echo " + "x" * 80},
+    }
+    output = harness.run(event=event)
+    assert output.startswith("BLOCKED:"), output
+    assert "did not acknowledge" in output
+
+
+def test_the_harness_catches_a_neutered_ack(harness: _Harness) -> None:
+    """Mutation check: drop the acknowledgement requirement and the small
+    no-reader case must stop blocking.
+
+    Without this, the test above would keep passing if the extension were
+    rewritten to allow without the acknowledgement -- it would just be
+    asserting that some unrelated failure happened to block.
+    """
+    source = harness.extension_path.read_text()
+    assert _ACK_REQUIREMENT in source, (
+        "the pinned acknowledgement check is gone from the template; update "
+        "_ACK_REQUIREMENT so this check keeps mutating something real"
+    )
+    harness.extension_path.write_text(source.replace(_ACK_REQUIREMENT, "if (false) {"))
+
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    event = {
+        "type": "tool_call",
+        "toolName": "bash",
+        "toolCallId": "call_7",
+        "input": {"command": "echo " + "x" * 80},
+    }
+    assert harness.run(event=event) == "ALLOWED", (
+        "with the acknowledgement requirement removed the small no-reader case "
+        "must allow; if it still blocks, this harness is not testing what it claims"
+    )
 
 
 def test_a_hang_past_the_deadline_blocks(harness: _Harness) -> None:

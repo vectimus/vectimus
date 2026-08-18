@@ -42,6 +42,10 @@ pytestmark = pytest.mark.skipif(
 # quietly mutating nothing.
 _THROW_ON_DENY = "finish(blocked(reasonFrom(trimmed)))"
 
+# The line that requires the allow acknowledgement.  Pinned for the same
+# reason: the no-acknowledgement revert check must mutate something real.
+_ACK_REQUIREMENT = "if (ack !== ALLOW_ACK) {"
+
 _DRIVER = """
 import { readFileSync } from "node:fs"
 
@@ -214,6 +218,44 @@ def test_a_check_that_exits_without_reading_the_call_throws(harness: _Harness) -
     output = harness.run(args={"command": "echo " + "x" * 512_000})
     assert output.startswith("THREW:"), output
     assert "did not read the tool call" in output
+
+
+def test_a_normal_sized_call_whose_check_never_reads_still_blocks(harness: _Harness) -> None:
+    """A replaced `vectimus` must fall closed on an ordinary payload too.
+
+    Before the allow acknowledgement, a check that ignored stdin sailed
+    through on any payload that fit the OS pipe buffer: the write completed,
+    stdout was empty, the exit was 0 -- byte-for-byte an allow -- and only an
+    oversized payload tripped EPIPE.  So a shim (`/usr/bin/true`, a wrapper
+    that never reads the call) allowed every normal-sized tool call.  The
+    missing acknowledgement now blocks it at any size.
+    """
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    output = harness.run(args={"command": "echo " + "x" * 80})
+    assert output.startswith("THREW:"), output
+    assert "did not acknowledge" in output
+
+
+def test_the_harness_catches_a_neutered_ack(harness: _Harness) -> None:
+    """Mutation check: drop the acknowledgement requirement and the small
+    no-reader case must stop blocking.
+
+    Without this, the test above would keep passing if the plugin were
+    rewritten to allow without the acknowledgement -- it would just be
+    asserting that some unrelated error happened to be raised.
+    """
+    source = harness.plugin_path.read_text()
+    assert _ACK_REQUIREMENT in source, (
+        "the pinned acknowledgement check is gone from the template; update "
+        "_ACK_REQUIREMENT so this check keeps mutating something real"
+    )
+    harness.plugin_path.write_text(source.replace(_ACK_REQUIREMENT, "if (false) {"))
+
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    assert harness.run(args={"command": "echo " + "x" * 80}) == "ALLOWED", (
+        "with the acknowledgement requirement removed the small no-reader case "
+        "must allow; if it still blocks, this harness is not testing what it claims"
+    )
 
 
 def test_a_hang_past_the_deadline_throws(harness: _Harness) -> None:
