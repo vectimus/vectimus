@@ -34,13 +34,15 @@ VALID_SOURCES = (
     "gemini-cli",
     "codex",
     "opencode",
+    "pi",
 )
 _HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
 
 # Sources whose deny payload is the flat {"decision", "reason"} shape.  For
-# OpenCode the consumer is the Vectimus plugin itself, which turns any stdout
-# at all into a thrown error -- OpenCode has no native deny JSON.
-_SIMPLE_DENY_SOURCES = ("gemini-cli", "opencode")
+# OpenCode and Pi the consumer is the Vectimus plugin or extension itself,
+# which turns any stdout at all into a block -- neither agent has a native
+# deny JSON of its own.
+_SIMPLE_DENY_SOURCES = ("gemini-cli", "opencode", "pi")
 
 # Every evaluation path (server, daemon, inline) allows on an explicit ALLOW and
 # nothing else.  A missing, malformed or unknown verdict means the evaluation
@@ -366,11 +368,12 @@ def hook_cmd(source: str) -> None:
             reason = "Normalisation error (fail closed)"
         else:
             from vectimus.adapters.opencode import OpenCodeNormalisationError
+            from vectimus.adapters.pi import PiNormalisationError
 
-            # The OpenCode adapter's refusals name the tool and point at the
+            # The strict adapters' refusals name the tool and point at their
             # inventory doc, which is what the agent needs to act on the
             # block.  The daemon path already passes this detail through.
-            if isinstance(exc, OpenCodeNormalisationError):
+            if isinstance(exc, OpenCodeNormalisationError | PiNormalisationError):
                 reason = f"Vectimus: {exc} (fail closed)"
         _emit_deny(source, payload, reason)
 
