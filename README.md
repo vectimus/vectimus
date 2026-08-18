@@ -129,8 +129,8 @@ Same Cedar policies govern both.  One install.  Works on macOS, Linux and Window
 from vectimus.integrations.langgraph import VectimusMiddleware
 
 middleware = VectimusMiddleware(
-    policy_dir="./policies",   # Optional, defaults to bundled policies
-    observe_mode=False,        # Optional, defaults to False
+    policy_dir="./policies",  # Optional, defaults to bundled policies
+    observe_mode=False,  # Optional, defaults to False
 )
 
 agent = create_agent(
@@ -169,8 +169,8 @@ Both support observe mode for trialling without enforcement.
 from vectimus.integrations.adk import VectimusADKPlugin
 
 plugin = VectimusADKPlugin(
-    policy_dir="./policies",   # Optional, defaults to bundled policies
-    observe_mode=False,        # Optional, defaults to False
+    policy_dir="./policies",  # Optional, defaults to bundled policies
+    observe_mode=False,  # Optional, defaults to False
 )
 
 runner = Runner(

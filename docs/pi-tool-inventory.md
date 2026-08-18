@@ -95,7 +95,7 @@ arguments are recorded in `raw_input` and are not required to be present.
 | `bash` | `command` | `timeout` | `shell_command`, then refined by `_refine_shell_action` (may become `file_read`, `file_write`, `git_operation`, `package_operation`, `infrastructure`) | `command`, `file_path` when the command reads or writes a file, `script_content` when it runs a script |
 | `read` | `path` | `offset`, `limit` | `file_read` | `file_path` |
 | `write` | `path`, `content` | -- | `file_write` | `file_path`, `file_content` |
-| `edit` | `path`, `edits` | -- | `file_write` | `file_path`, `file_content` from the joined `newText` values -- see [edit](#edit) |
+| `edit` | `path`, plus replacements (`edits`, or the legacy top-level pair) | -- | `file_write` | `file_path`, `file_content` from the joined `newText` values -- see [edit](#edit) |
 | `grep` | `pattern` | `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit` | `file_read` | `file_path` from `path` when given |
 | `find` | `pattern` | `path`, `limit` | `file_read` | `file_path` from `path` when given |
 | `ls` | -- | `path`, `limit` | `file_read` | `file_path` from `path` when given |
@@ -134,10 +134,15 @@ the content-inspection rules (secrets, credentials) need to see: the text
 about to enter the file.  `oldText` is the match target, not new content,
 so it is not part of `file_content`; both remain in `raw_input`.
 
-The adapter requires `edits` to be a non-empty list of objects each
-carrying a string `newText`.  Pi's own `validateEditInput` rejects an
-empty `edits`, so an empty array reaching the adapter means something
-upstream changed, and it is denied rather than treated as a no-op write.
+The adapter requires a non-empty list of objects each carrying a string
+`newText`, and accepts the legacy top-level `{ oldText, newText }` pair as
+a single replacement.  Requiring the `edits` name specifically would refuse
+a shape Pi itself accepts, so the required-argument table lists only `path`
+for this tool and the replacement check lives in one place.
+
+Pi's own `validateEditInput` rejects an empty `edits`, so an empty array
+reaching the adapter means something upstream changed; it is denied rather
+than treated as a no-op write.
 
 ### Relative paths
 

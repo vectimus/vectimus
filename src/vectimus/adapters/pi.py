@@ -54,11 +54,16 @@ PI_TOOL_MAP: dict[str, str] = {
 # `ls` is absent on purpose, and `grep`/`find` require only their pattern:
 # their `path` is optional in Pi's schema and defaults to the working
 # directory, so demanding it would deny ordinary sessions.
+#
+# `edit` lists only its path.  Its replacements can arrive as `edits` or as
+# the legacy top-level pair, so requiring either name here would refuse a
+# shape Pi itself accepts; `_edit_content` is the single place that decides
+# whether the replacements are readable.
 _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     "bash": ("command",),
     "read": ("path",),
     "write": ("path", "content"),
-    "edit": ("path", "edits"),
+    "edit": ("path",),
     "grep": ("pattern",),
     "find": ("pattern",),
 }
