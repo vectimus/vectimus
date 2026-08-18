@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode support (#22). `vectimus init` installs a plugin into OpenCode's user-level config directory (`--project` puts it in `./.opencode/plugin/` instead) that pipes every tool call through `vectimus hook --source opencode`. A call is allowed only when the hook exits 0 with empty stdout; a deny payload, unparseable output, a non-zero exit, a signal, a missing `vectimus` binary or a 30-second deadline all throw, which is the only way an OpenCode plugin can block. Covers every built-in tool -- shell, reads, writes, patches, glob/grep, web fetch and search, subagent spawns. See [docs/opencode.md](docs/opencode.md).
+- `docs/opencode-tool-inventory.md`: the OpenCode tool name -> argument schema -> action type table, derived from the OpenCode v1.18.18 source, with the file and symbol each fact came from.
+
+### Fixed
+
+- **Only an explicit `allow` verdict allows, on every evaluation path.** The hook reached a verdict three ways -- remote server, local daemon, inline evaluation -- and each treated "not a deny" as an allow. A truncated daemon reply, a verdict string from a newer server, or a missing `decision` key would therefore let the tool call through. All three now deny on anything that is not `allow`. Affects every source, not just OpenCode.
+- The daemon and the `/evaluate` endpoint no longer default a missing source to `claude-code`. Normalisation is source-specific, so guessing evaluated the payload under the wrong adapter's assumptions; both now deny. `X-Vectimus-Source` is required on `/evaluate`.
+
+### Notes
+
+- Under OpenCode, MCP *tool* calls are blocked rather than evaluated: OpenCode names them `sanitize(server)_sanitize(tool)`, which cannot be split back into a server and a tool name. The shipped `vectimus-mcp-001` rule already denies unapproved servers, so this only costs coverage for servers you had approved. MCP *resource* tools (`read_mcp_resource` and friends) evaluate normally.
+- Under OpenCode, `apply_patch` calls that touch more than one file are blocked: one evaluation carries one file path, so a multi-file patch could carry an innocuous path past a path rule while writing the rest.
+- Escalate is a hard block under OpenCode, matching Claude Code (#53). Real escalation via `permission.ask` is a follow-up.
+- After upgrading, stop the daemon (`vectimus daemon stop`; the next hook call starts a fresh one): one left running from an older install has the old adapters loaded and denies `--source opencode` as an unknown source.
+- Before downgrading below 0.23.0, run `vectimus remove`. A 0.23 OpenCode plugin talking to a CLI without the `opencode` source fails closed on every tool call -- by design, but it looks like the agent has locked up.
+
 ## [0.22.2] - 2026-07-02
 
 ### Fixed
