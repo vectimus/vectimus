@@ -140,3 +140,20 @@ agent has locked up.
 If OpenCode runs behind a gateway that answers with its own built-in agent
 instead of spawning OpenCode, no OpenCode plugin sees those tool calls.
 That path is governed by whatever the gateway itself enforces.
+
+### Known event-model limitations (tracked)
+
+Path-based controls (which file may be read or written) apply normally. The
+gaps below are in the *content* and *scope* dimensions and are tracked for a
+dedicated fix; several also affect the older adapters.
+
+- **Unscoped recursive reads.** `grep` and `glob` invoked without a `path`
+  read the working directory recursively, but the event carries no path, so
+  path policies do not match the effective scope
+  ([#71](https://github.com/vectimus/vectimus/issues/71)).
+- **Unscoped MCP resource listing.** `list_mcp_resources` /
+  `list_mcp_resource_templates` carry no server, so the MCP server allowlist
+  does not constrain them ([#73](https://github.com/vectimus/vectimus/issues/73)).
+- **Symlinked paths** are matched lexically, so a link into a protected
+  directory is judged on the link's own path
+  ([#74](https://github.com/vectimus/vectimus/issues/74); product-wide).

@@ -134,3 +134,21 @@ that mutates `event.input` in place changes the arguments Vectimus then
 inspects, and one loaded after it can mutate them again afterwards.  A
 single-extension install is the supported deployment; if you run others
 alongside Vectimus, their ordering is worth checking.
+
+### Known event-model limitations (tracked)
+
+Path-based controls (which file may be read or written) apply normally. The
+gaps below are in the *content* and *scope* dimensions and are tracked for a
+dedicated fix; several also affect the older adapters.
+
+- **Unscoped recursive reads.** `grep`, `find` and `ls` invoked without a
+  `path` operate on the working directory, but the event carries no path, so
+  path policies do not match the effective scope
+  ([#71](https://github.com/vectimus/vectimus/issues/71)).
+- **Multi-edit content inspection.** `edit` joins its replacement chunks with
+  a newline, so a string that a content rule would catch can be split across
+  two adjacent replacements to evade inspection. Path rules on the edited
+  file still apply ([#72](https://github.com/vectimus/vectimus/issues/72)).
+- **Symlinked paths** are matched lexically, so a link into a protected
+  directory is judged on the link's own path
+  ([#74](https://github.com/vectimus/vectimus/issues/74); product-wide).
