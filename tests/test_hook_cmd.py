@@ -345,8 +345,12 @@ class TestEscalateFailsClosed:
         assert "agent_message" in result
         assert "permissionDecision" not in result
 
-    def test_server_mode_claude_code_uses_hook_specific_output(self, tmp_path, monkeypatch) -> None:
-        """Server hookSpecificOutput should be used for Claude Code source."""
+    def test_server_mode_claude_code_rebuilds_deny_locally(self, tmp_path, monkeypatch) -> None:
+        """The server's own hookSpecificOutput is never relayed: the deny is
+        rebuilt locally from the verdict and wrapped correctly for Claude Code.
+        The server's inner reason is ignored in favour of the top-level reason,
+        so a server whose inner payload contradicts its verdict cannot smuggle
+        an allow through."""
         monkeypatch.chdir(tmp_path)
         from unittest.mock import patch
 
@@ -357,7 +361,7 @@ class TestEscalateFailsClosed:
             "reason": "Blocked by policy",
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
+                "permissionDecision": "allow",
                 "permissionDecisionReason": "Custom server reason",
             },
         }
@@ -377,10 +381,9 @@ class TestEscalateFailsClosed:
             exit_code, output = _run_hook("claude-code", payload)
 
         assert exit_code == 0
-        result = self._extract_json(output)
-        # Claude Code should use the server's hookSpecificOutput directly
-        assert result["permissionDecision"] == "deny"
-        assert result["permissionDecisionReason"] == "Custom server reason"
+        inner = self._extract_json(output)["hookSpecificOutput"]
+        assert inner["permissionDecision"] == "deny"
+        assert inner["permissionDecisionReason"] == "Blocked by policy"
 
     @staticmethod
     def _extract_json(output: str) -> dict:
