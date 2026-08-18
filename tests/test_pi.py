@@ -220,7 +220,7 @@ class TestPiRelativePaths:
     @pytest.mark.parametrize(
         ("raw", "expected"),
         [
-            (r"C:\Users\dev\.ssh\id_rsa", "C:/Users/dev/.ssh/id_rsa"),
+            (r"C:\Users\dev\.ssh\id_rsa", "c:/users/dev/.ssh/id_rsa"),
             (r"\\server\share\secrets.txt", "//server/share/secrets.txt"),
         ],
     )
@@ -244,12 +244,12 @@ class TestPiRelativePaths:
             _payload("read", {"path": r"C:\proj\..\Users\dev\.ssh\id_rsa"}, cwd=r"C:\proj"),
             "pi",
         )
-        assert event.action.file_path == "C:/Users/dev/.ssh/id_rsa"
+        assert event.action.file_path == "c:/users/dev/.ssh/id_rsa"
 
     def test_a_windows_relative_path_joins_with_the_windows_cwd(self) -> None:
         """Joined the Windows way, then canonicalised like any Windows path."""
         event = normalise(_payload("read", {"path": r"sub\notes.txt"}, cwd=r"C:\proj"), "pi")
-        assert event.action.file_path == "C:/proj/sub/notes.txt"
+        assert event.action.file_path == "c:/proj/sub/notes.txt"
 
     def test_a_bash_redirect_to_a_relative_path_is_resolved_too(self) -> None:
         event = normalise(_payload("bash", {"command": "echo x > out.txt"}, cwd="/proj"), "pi")

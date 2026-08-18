@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ntpath
 import posixpath
+import re
 import uuid
 from typing import Any
 
@@ -149,22 +150,106 @@ def _edit_content(tool_input: dict[str, Any]) -> str:
     return "\n".join(texts)
 
 
-def _canonical_windows_path(raw: str) -> str:
+# A drive-letter prefix (``C:``) or any backslash means the path is written in
+# Windows form.  A POSIX-shaped ``//server/share`` with no backslash is left to
+# the POSIX branch, since its forward slashes already match policy patterns.
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+# A tilde followed by a digit is the shape of an 8.3 short-name alias
+# (``PROGRA~1``), which points at a long name this adapter cannot resolve.
+_SHORT_NAME_RE = re.compile(r"~\d")
+
+
+def _looks_windows(path: str) -> bool:
+    """Whether *path* is written in Windows form and must be canonicalised.
+
+    A backslash anywhere, or a leading drive letter, is enough.  A path made
+    only of forward slashes -- including a POSIX ``//server/share`` -- is left
+    to the POSIX branch, whose separators already match the policy patterns.
+    """
+    return "\\" in path or bool(_DRIVE_RE.match(path))
+
+
+def _reject_uncanonicalisable_windows(raw: str, tool_name: str) -> None:
+    """Raise for Windows shapes this adapter cannot safely reduce to one form.
+
+    Each would otherwise reach Cedar as a path matching none of the rules it
+    should -- a fail-open -- so it is denied rather than guessed at.  ``raw``
+    is inspected before ``ntpath.normpath`` collapses anything, because
+    normpath would hide the trailing dots and short names that make these
+    shapes ambiguous.
+    """
+    probe = raw.replace("/", "\\")
+    if probe.startswith("\\\\.\\") or probe.startswith("\\\\?\\"):
+        raise PiNormalisationError(
+            f"Pi tool '{tool_name}' sent the Windows device path '{raw}', which names "
+            f"no ordinary file and cannot be matched against policy paths.  See {DOC_URL}"
+        )
+    for segment in re.split(r"[\\/]", raw):
+        if segment in ("", ".", ".."):
+            continue
+        if segment.endswith(".") or segment.endswith(" "):
+            raise PiNormalisationError(
+                f"Pi tool '{tool_name}' sent the path '{raw}' with a segment Windows "
+                f"would strip a trailing dot or space from ('{segment}'), so what "
+                f"reaches the filesystem is not what the policy sees.  See {DOC_URL}"
+            )
+        if _SHORT_NAME_RE.search(segment):
+            raise PiNormalisationError(
+                f"Pi tool '{tool_name}' sent the 8.3 short-name segment '{segment}' in "
+                f"'{raw}', which aliases a long name this adapter cannot resolve.  "
+                f"See {DOC_URL}"
+            )
+
+
+def _canonical_windows_path(raw: str, cwd: str | None, tool_name: str) -> str:
     """Return a Windows or UNC path in the form policy patterns are written in.
 
-    The separators are the problem.  A rule guarding ``*/.ssh/*`` matches
-    nothing in ``C:\\Users\\dev\\.ssh\\id_rsa``, so a Windows session judged by
-    a POSIX evaluation server would pass every path rule it should have
-    failed -- recognising the path as absolute and then handing it on
-    untouched is a fail-open of its own.
+    The separators and the case are both the problem.  A rule guarding
+    ``*.ssh/*`` matches nothing in ``C:\\Users\\dev\\.SSH\\id_rsa``: the
+    backslashes are wrong, and Windows' case-insensitivity means ``.SSH`` has
+    to count as ``.ssh``.  A Windows session judged by a POSIX evaluation
+    server would otherwise pass every path rule it should have failed -- a
+    fail-open.
 
-    Traversal is collapsed with ``ntpath`` first, because ``posixpath`` cannot
-    see ``..\\`` as traversal at all and the shared ``_extract_file_path``
-    would leave it in place.  Folding the separators afterwards gives one
-    spelling both platforms can match.  A UNC path keeps its two leading
-    slashes, which ``posixpath.normpath`` preserves.
+    So every Windows-shaped input is folded to one spelling: traversal
+    collapsed with ``ntpath`` (which understands ``..\\``), a relative path
+    joined onto the working directory, separators turned to forward slashes,
+    and the whole path lowercased.  The adapter therefore guarantees Windows
+    paths are matched case-insensitively against the lowercase, forward-slash
+    patterns the packs use; a pattern meant to catch a Windows path has to be
+    written that way.
+
+    Shapes that cannot be reduced to a matchable absolute path -- device
+    namespaces, root-relative paths that dropped their drive, trailing
+    dot/space segments, 8.3 aliases -- are refused rather than passed through,
+    so an unresolvable Windows path fails closed instead of open.
     """
-    return ntpath.normpath(raw).replace("\\", "/")
+    _reject_uncanonicalisable_windows(raw, tool_name)
+
+    normalised = ntpath.normpath(raw)
+    if not ntpath.isabs(normalised):
+        if cwd is None:
+            raise PiNormalisationError(
+                f"Pi tool '{tool_name}' sent the relative path '{raw}' with no 'cwd' to "
+                f"resolve it against, so it cannot be matched against policy paths.  "
+                f"See {DOC_URL}"
+            )
+        _reject_uncanonicalisable_windows(cwd, tool_name)
+        normalised = ntpath.normpath(ntpath.join(cwd, raw))
+
+    # Absolute to ntpath but carrying no drive and not a UNC share means a
+    # root-relative path like ``\\foo`` whose drive was dropped: it resolves
+    # against whichever drive is current, so it matches no rule reliably.
+    drive, _ = ntpath.splitdrive(normalised)
+    if not drive and not normalised.startswith("\\\\"):
+        raise PiNormalisationError(
+            f"Pi tool '{tool_name}' sent the root-relative path '{raw}', which names no "
+            f"drive and so resolves against whichever one is current -- it cannot be "
+            f"matched against policy paths.  See {DOC_URL}"
+        )
+
+    return normalised.replace("\\", "/").lower()
 
 
 def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
@@ -180,33 +265,28 @@ def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
     would report a pass it did not earn.  The extension always sends
     ``ctx.cwd``, so this only fires on a hand-built payload.
 
-    Both path flavours are recognised regardless of the host platform, so a
-    payload from a Windows session is read the same way on a Linux evaluation
-    server and vice versa.  Judging ``C:\\Users\\dev\\.ssh\\id_rsa`` by POSIX
-    rules alone would call it relative and join it onto the cwd, producing a
-    path that matches no rule at all -- a fail-open.  A Windows path is then
-    rewritten by ``_canonical_windows_path``, since keeping its backslashes
-    would match no rule either.  The shared ``_extract_file_path`` still does
-    the POSIX traversal collapsing afterwards.
+    Windows-shaped inputs are canonicalised first, before any POSIX shortcut.
+    A POSIX-first check would call a mixed-separator UNC path like
+    ``//server\\share\\.ssh\\id_rsa`` absolute and hand it on with its
+    backslashes intact -- matchable by no rule, so a fail-open.  See
+    :func:`_canonical_windows_path` for the single form Windows paths are
+    reduced to and the shapes it refuses.
     """
-    # POSIX first: `ntpath.isabs` accepts a leading `/` too, so only a path
-    # that ntpath alone calls absolute -- a drive letter, or a UNC share -- is
-    # a Windows one, and only those want rewriting.
+    if _looks_windows(raw):
+        return _canonical_windows_path(raw, cwd, tool_name)
     if posixpath.isabs(raw):
         return raw
-    if ntpath.isabs(raw):
-        return _canonical_windows_path(raw)
     if cwd is None:
         raise PiNormalisationError(
             f"Pi tool '{tool_name}' sent the relative path '{raw}' with no 'cwd' to "
             f"resolve it against, so it cannot be matched against policy paths.  "
             f"See {DOC_URL}"
         )
-    # Join with the flavour the working directory is written in, so a Windows
-    # cwd keeps its own shape instead of gaining a POSIX separator, and then
-    # goes through the same rewrite as an absolute Windows path.
-    if ntpath.isabs(cwd) and not posixpath.isabs(cwd):
-        return _canonical_windows_path(ntpath.join(cwd, raw))
+    # A POSIX-shaped relative path under a Windows working directory is
+    # resolved and canonicalised the Windows way, so it gains that cwd's drive
+    # rather than a bare POSIX join that would match no Windows rule.
+    if _looks_windows(cwd):
+        return _canonical_windows_path(raw, cwd, tool_name)
     return posixpath.join(cwd, raw)
 
 
