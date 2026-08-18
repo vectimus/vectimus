@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -447,6 +448,111 @@ class TestPackPatternsMatchCanonicalisedWindowsPaths:
         assert rule in decision.matched_policy_ids, (
             f"native spelling {raw!r} must still be denied by {rule}"
         )
+
+
+# A pack rule's `@id`, then every `context.file_path like "..."` glob in its body.
+_RULE_ID_RE = re.compile(r'@id\("([^"]+)"\)')
+_FILE_PATH_LIKE_RE = re.compile(r'context\.file_path\s+like\s+"((?:\\.|[^"\\])*)"')
+
+
+def _cedar_unescape(glob: str) -> str:
+    """Turn a Cedar string literal's bytes into the glob it denotes.
+
+    Cedar escapes a backslash as ``\\\\``; the packs use that for native Windows
+    separators (``*\\\\Windows\\\\System32\\\\*``).  Collapsing the doubled
+    backslashes gives the single-backslash glob the pattern actually matches.
+    """
+    return glob.replace("\\\\", "\\")
+
+
+def _file_path_globs_by_rule() -> list[tuple[str, str, list[str]]]:
+    """Every (pack file, rule id, [file_path globs]) across the vendored packs."""
+    out: list[tuple[str, str, list[str]]] = []
+    for cedar in sorted(_BUNDLED_POLICIES.glob("*/*.cedar")):
+        text = cedar.read_text()
+        ids = list(_RULE_ID_RE.finditer(text))
+        for i, m in enumerate(ids):
+            end = ids[i + 1].start() if i + 1 < len(ids) else len(text)
+            body = text[m.end() : end]
+            globs = [_cedar_unescape(g) for g in _FILE_PATH_LIKE_RE.findall(body)]
+            if globs:
+                out.append((cedar.name, m.group(1), globs))
+    return out
+
+
+class TestEveryWindowsTargetingPatternHasACompanion:
+    """Completeness guard for fold-both-sides: a Windows-targeting path pattern
+    that lacks its canonical companion would silently fail open once the Pi
+    adapter canonicalises, so this proves none is missing.
+
+    The Pi adapter folds Windows paths to lowercase + forward-slash.  A
+    `context.file_path` glob only needs a companion when it is *not* already in
+    that form -- i.e. it carries an uppercase letter or a backslash.  For every
+    such glob the canonical companion ``glob.replace("\\\\", "/").lower()`` must
+    appear as a `file_path` glob in the SAME rule.  Add a Windows-only pattern
+    without its companion and this fails -- the safety net that keeps the fold
+    complete as the packs grow.
+
+    Two families are exempt: a canonicalised Pi path can never reach them, so a
+    companion would be dead code (and this guard must not demand one).
+      * mcp-005 ``*Jenkinsfile*`` -- an mcp_tool rule; Pi emits no MCP tools, and
+        no file_write Jenkinsfile rule exists to reopen.
+      * infra-007 traversal globs -- they match a literal ``..``, which
+        ntpath/os.path normpath collapse before evaluation, so no canonical form
+        contains ``..``.
+    """
+
+    # (rule id, exact glob) deliberately left without a companion.  Keep this in
+    # lockstep with the reasoning above; removing an entry re-arms the guard.
+    EXEMPT: set[tuple[str, str]] = {
+        ("vectimus-mcp-005", "*Jenkinsfile*"),
+        ("vectimus-infra-007", "/Users/*/../*"),
+        ("vectimus-infra-007", r"*\Users\*\..\*"),
+        ("vectimus-infra-007", r"C:\Users\*\..\*"),
+    }
+
+    def test_no_windows_targeting_file_path_pattern_lacks_a_companion(self) -> None:
+        missing: list[str] = []
+        for pack, rule_id, globs in _file_path_globs_by_rule():
+            present = set(globs)
+            for glob in globs:
+                canonical = glob.replace("\\", "/").lower()
+                if canonical == glob:
+                    continue  # already lowercase/forward-slash: survives the fold
+                if (rule_id, glob) in self.EXEMPT:
+                    continue
+                if canonical not in present:
+                    missing.append(f"{pack} {rule_id}: {glob!r} -> needs {canonical!r}")
+        assert not missing, (
+            "these file_path patterns target a Windows spelling but have no "
+            "lowercase/forward-slash companion in the same rule, so a canonicalised "
+            "Pi write would fail open -- add the companion (or, if a canonicalised "
+            "path can never reach the rule, an EXEMPT entry with the reason):\n  "
+            + "\n  ".join(missing)
+        )
+
+    def test_the_guard_would_fire_without_the_companions(self) -> None:
+        """Anti-vacuity for the guard itself: the check is only meaningful if it
+        would flag a Windows-targeting glob whose companion is absent.  Simulate
+        one and confirm the same logic reports it."""
+        globs = ["*CLAUDE.md"]  # no "*claude.md" beside it
+        present = set(globs)
+        flagged = [
+            g
+            for g in globs
+            if g.replace("\\", "/").lower() != g and g.replace("\\", "/").lower() not in present
+        ]
+        assert flagged == ["*CLAUDE.md"]
+
+    def test_every_exempt_entry_still_exists_in_the_packs(self) -> None:
+        """Keep EXEMPT honest: an exemption for a glob no longer in the packs is
+        stale and would hide a future re-introduction, so each must still match a
+        real rule/glob pair."""
+        real = {
+            (rule_id, glob) for _, rule_id, globs in _file_path_globs_by_rule() for glob in globs
+        }
+        stale = self.EXEMPT - real
+        assert not stale, f"EXEMPT entries no longer present in the packs: {stale}"
 
 
 class TestPiNormaliserRefusals:
