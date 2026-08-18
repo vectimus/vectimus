@@ -521,29 +521,63 @@ def _extract_braced_block(text: str, keyword: str) -> str:
     return text[start + 1 :]
 
 
+class UnsupportedCompanionShapeError(Exception):
+    """A forbid rule carries file_path patterns in a boolean shape the flat-OR
+    companion collector cannot verify, so the guard fails closed rather than
+    guess which globs positively deny."""
+
+
+def _strip_string_literals(text: str) -> str:
+    """Blank out ``"..."`` spans so operators inside globs are not mistaken for
+    boolean structure (a glob may legitimately contain ``&&`` or ``(``)."""
+    out: list[str] = []
+    in_str = False
+    for ch in text:
+        if ch == '"':
+            in_str = not in_str
+            continue
+        out.append(" " if in_str else ch)
+    return "".join(out)
+
+
+def _has_unsupported_boolean_shape(when_block: str) -> bool:
+    """Whether a ``when`` condition is anything but a flat OR of predicates.
+
+    The collector only understands ``a || b || c``.  Any ``&&``, ``!`` or
+    parenthesised grouping *outside string literals* is a shape it cannot reason
+    about.  Real packs use these only in command-only rules, which carry no
+    file_path pattern to protect, so failing closed here never fires on a real
+    file_path rule -- but an exotic future one cannot slip through mis-read.
+    """
+    outside = _strip_string_literals(when_block)
+    return any(tok in outside for tok in ("&&", "!", "(", ")"))
+
+
 def _denying_file_path_globs(rule_body: str) -> set[str]:
     """The file_path globs a rule *positively denies* on.
 
-    Structural, not lexical: only a ``forbid`` rule denies, only its ``when``
-    condition is positive (an ``unless`` clause negates the deny), and a glob
-    negated with ``!`` does not deny.  ``rule_body`` must already be
-    comment-stripped.  A companion that lives only in a comment, an ``unless``
-    block, a ``permit`` rule, or behind a ``!`` is therefore not counted -- which
-    is exactly what stops the guard being satisfied by a companion that protects
-    nothing.
+    Structural, not lexical: only a ``forbid`` rule denies, and only its ``when``
+    condition (not an ``unless`` clause, not a ``permit`` rule) is positive.
+    ``rule_body`` must already be comment-stripped, so a companion that lives only
+    in a comment is not counted.  If a rule carrying file_path patterns uses any
+    boolean shape beyond a flat OR (``&&``, ``!``, parentheses), the collector
+    fails closed (:class:`UnsupportedCompanionShapeError`) rather than mis-read which
+    globs deny -- ``companion && false`` and ``!(true && companion)`` deny nothing
+    and ``!(!(companion))`` denies, none of which a flat-OR reading gets right.
     """
     if not re.search(r"\bforbid\b", rule_body):
         return set()
     when_block = _extract_braced_block(rule_body, "when")
-    globs: set[str] = set()
-    for m in _FILE_PATH_LIKE_RE.finditer(when_block):
-        prefix = when_block[: m.start()].rstrip()
-        while prefix.endswith("("):
-            prefix = prefix[:-1].rstrip()
-        if prefix.endswith("!"):
-            continue  # negated: does not contribute a deny
-        globs.add(_cedar_unescape(m.group(1)))
-    return globs
+    matches = list(_FILE_PATH_LIKE_RE.finditer(when_block))
+    if not matches:
+        return set()
+    if _has_unsupported_boolean_shape(when_block):
+        raise UnsupportedCompanionShapeError(
+            "a forbid rule mixes file_path patterns with a non-flat-OR boolean "
+            "shape (&&, !, or parentheses); the companion collector refuses to "
+            "guess which globs positively deny"
+        )
+    return {_cedar_unescape(m.group(1)) for m in matches}
 
 
 def _denying_globs_by_rule(policy_dir: Path) -> list[tuple[str, str, set[str]]]:
@@ -560,27 +594,52 @@ def _denying_globs_by_rule(policy_dir: Path) -> list[tuple[str, str, set[str]]]:
     return out
 
 
-def _upstream_policies_dir() -> Path | None:
-    """The source-of-truth policies repo, when checked out beside this one.
+_EXPECTED_PACK_COUNT = 11
 
-    The guard runs against it too so a companion missing upstream (which feeds
-    the live API) is caught, not just the vendored copy.  Resolved from
-    ``VECTIMUS_UPSTREAM_POLICIES`` or the sibling ``../policies`` checkout;
-    ``None`` when absent (e.g. CI), where that corpus is simply not scanned.
-    """
+
+def _is_valid_corpus(path: Path) -> bool:
+    """Whether *path* holds at least the expected number of populated packs."""
+    if not path.is_dir():
+        return False
+    packs = [d for d in path.iterdir() if d.is_dir() and any(d.glob("*.cedar"))]
+    return len(packs) >= _EXPECTED_PACK_COUNT
+
+
+def _upstream_candidate() -> Path | None:
+    """The upstream corpus location: the env override, else the sibling checkout."""
     env = os.environ.get("VECTIMUS_UPSTREAM_POLICIES")
-    if env:
-        p = Path(env)
-        return p if p.is_dir() else None
+    if env is not None and env.strip():
+        return Path(env)
     sibling = _BUNDLED_POLICIES.parent.parent / "policies"
-    return sibling if sibling.is_dir() and sibling != _BUNDLED_POLICIES else None
+    return sibling if sibling != _BUNDLED_POLICIES else None
 
 
-def _guarded_corpora() -> list[tuple[str, Path]]:
+def _corpora_to_scan() -> list[tuple[str, Path]]:
+    """Corpora the guard must scan: vendored, plus the upstream source-of-truth.
+
+    Fail closed.  The upstream packs feed the live API, so a guard that silently
+    scanned vendored-only would let upstream drift unseen -- the exact gap that
+    let the AppData patterns through.  If the upstream corpus cannot be located or
+    is incomplete (env unset with no sibling checkout, missing, empty, or fewer
+    than the expected packs) this raises rather than degrade.  The only way to
+    scan vendored-only is the explicit ``VECTIMUS_GUARD_VENDORED_ONLY`` opt-out,
+    which must never be set in the upstream repo's own CI (where the tree *is*
+    upstream, so drift is caught there).
+    """
     corpora = [("vendored", _BUNDLED_POLICIES)]
-    upstream = _upstream_policies_dir()
-    if upstream is not None:
-        corpora.append(("upstream", upstream))
+    if os.environ.get("VECTIMUS_GUARD_VENDORED_ONLY"):
+        return corpora
+    candidate = _upstream_candidate()
+    if candidate is None or not _is_valid_corpus(candidate):
+        raise RuntimeError(
+            "completeness guard: upstream corpus not found or incomplete "
+            f"(candidate={str(candidate)!r}). Point VECTIMUS_UPSTREAM_POLICIES at "
+            "the vectimus/policies checkout so the authoritative packs are scanned, "
+            "or set VECTIMUS_GUARD_VENDORED_ONLY=1 to scan vendored only.  Refusing "
+            "to silently pass vendored-only, which would let the upstream corpus "
+            "drift unseen."
+        )
+    corpora.append(("upstream", candidate))
     return corpora
 
 
@@ -588,7 +647,10 @@ class TestEveryWindowsTargetingPatternHasACompanion:
     """Completeness guard for fold-both-sides: a Windows-targeting path pattern
     that lacks its canonical companion would silently fail open once the Pi
     adapter canonicalises, so this proves none is missing -- in BOTH the vendored
-    packs and the upstream source-of-truth (when checked out beside this repo).
+    packs and the upstream source-of-truth that feeds the live API.  Resolving the
+    corpora fails closed (:func:`_corpora_to_scan`): if the upstream corpus cannot
+    be scanned the guard ERRORS rather than quietly pass vendored-only, so upstream
+    drift cannot slip through a green CI run.
 
     The Pi adapter folds Windows paths to lowercase + forward-slash.  A
     `context.file_path` glob only needs a companion when it is *not* already in
@@ -600,7 +662,9 @@ class TestEveryWindowsTargetingPatternHasACompanion:
 
     "Positively denies on" is structural, not lexical (see
     :func:`_denying_file_path_globs`): a companion in a comment, an ``unless``
-    clause, a ``permit`` rule, or behind ``!`` denies nothing and does not count.
+    clause or a ``permit`` rule denies nothing and does not count, and a rule that
+    mixes file_path patterns with a non-flat-OR boolean shape (``&&``, ``!``,
+    parentheses) is refused outright rather than mis-read.
 
     Two families are exempt: a canonicalised Pi path can never reach them, so a
     companion would be dead code (and this guard must not demand one).
@@ -620,20 +684,20 @@ class TestEveryWindowsTargetingPatternHasACompanion:
         ("vectimus-infra-007", r"C:\Users\*\..\*"),
     }
 
-    @pytest.mark.parametrize(("corpus", "policy_dir"), _guarded_corpora())
-    def test_no_windows_targeting_file_path_pattern_lacks_a_companion(
-        self, corpus: str, policy_dir: Path
-    ) -> None:
+    def test_no_windows_targeting_file_path_pattern_lacks_a_companion(self) -> None:
         missing: list[str] = []
-        for pack, rule_id, deny_globs in _denying_globs_by_rule(policy_dir):
-            for glob in deny_globs:
-                canonical = glob.replace("\\", "/").lower()
-                if canonical == glob:
-                    continue  # already lowercase/forward-slash: survives the fold
-                if (rule_id, glob) in self.EXEMPT:
-                    continue
-                if canonical not in deny_globs:
-                    missing.append(f"[{corpus}] {pack} {rule_id}: {glob!r} -> needs {canonical!r}")
+        for corpus, policy_dir in _corpora_to_scan():
+            for pack, rule_id, deny_globs in _denying_globs_by_rule(policy_dir):
+                for glob in deny_globs:
+                    canonical = glob.replace("\\", "/").lower()
+                    if canonical == glob:
+                        continue  # already lowercase/forward-slash: survives the fold
+                    if (rule_id, glob) in self.EXEMPT:
+                        continue
+                    if canonical not in deny_globs:
+                        missing.append(
+                            f"[{corpus}] {pack} {rule_id}: {glob!r} -> needs {canonical!r}"
+                        )
         assert not missing, (
             "these file_path patterns target a Windows spelling but have no "
             "lowercase/forward-slash companion the same rule denies on, so a "
@@ -641,6 +705,54 @@ class TestEveryWindowsTargetingPatternHasACompanion:
             "canonicalised path can never reach the rule, an EXEMPT entry with the "
             "reason):\n  " + "\n  ".join(missing)
         )
+
+    def test_the_guard_fails_closed_when_upstream_is_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The important one: no silent vendored-only pass.  With the opt-out unset
+        and the upstream path pointing nowhere, resolving the corpora must ERROR --
+        so CI cannot go green while the upstream (authoritative) corpus drifts."""
+        monkeypatch.delenv("VECTIMUS_GUARD_VENDORED_ONLY", raising=False)
+        monkeypatch.setenv("VECTIMUS_UPSTREAM_POLICIES", "/vectimus/no-such-corpus")
+        with pytest.raises(RuntimeError, match="upstream corpus not found or incomplete"):
+            _corpora_to_scan()
+
+    def test_the_guard_fails_closed_when_upstream_is_empty(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An empty or under-populated corpus (< 11 packs) is a misconfiguration,
+        not a pass -- resolving must ERROR rather than degrade to vendored-only."""
+        monkeypatch.delenv("VECTIMUS_GUARD_VENDORED_ONLY", raising=False)
+        monkeypatch.setenv("VECTIMUS_UPSTREAM_POLICIES", str(tmp_path))
+        with pytest.raises(RuntimeError, match="incomplete"):
+            _corpora_to_scan()
+
+    def test_vendored_only_requires_an_explicit_optout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The sole route to scanning vendored-only is the explicit opt-out env --
+        which must never be set in the upstream repo's own CI."""
+        monkeypatch.setenv("VECTIMUS_GUARD_VENDORED_ONLY", "1")
+        monkeypatch.setenv("VECTIMUS_UPSTREAM_POLICIES", "/vectimus/no-such-corpus")
+        assert [name for name, _ in _corpora_to_scan()] == ["vendored"]
+
+    def test_the_collector_fails_closed_on_non_flat_or_shapes(self) -> None:
+        """EDGE: the flat-OR collector must not guess on boolean forms it cannot
+        read.  ``companion && false`` denies nothing, ``!(!(companion))`` denies,
+        ``!(true && companion)`` does not -- so a rule mixing file_path patterns
+        with ``&&``, ``!`` or parentheses is refused, not mis-read."""
+        and_false = (
+            "forbid (principal, action, resource) when {\n"
+            '  context.file_path like "*CLAUDE.md" ||\n'
+            '  (context.file_path like "*claude.md" && false)\n};'
+        )
+        nested_negation = (
+            "forbid (principal, action, resource) when {\n"
+            '  !(!(context.file_path like "*claude.md"))\n};'
+        )
+        for body in (and_false, nested_negation):
+            with pytest.raises(UnsupportedCompanionShapeError):
+                _denying_file_path_globs(_strip_cedar_comments(body))
 
     def test_the_collector_ignores_comment_only_and_unless_only_companions(self) -> None:
         """The guard is only sound if a companion that denies nothing is rejected.
