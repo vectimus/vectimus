@@ -40,6 +40,7 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     ToolName.GEMINI_CLI: ("Gemini CLI", "hook config written"),
     ToolName.CODEX: ("Codex CLI", "hook config written"),
     ToolName.OPENCODE: ("OpenCode", "plugin installed"),
+    ToolName.PI: ("Pi", "extension installed"),
 }
 
 
@@ -65,8 +66,8 @@ _TOOL_CONFIG: dict[ToolName, tuple[str, str]] = {
     "project_scope",
     is_flag=True,
     default=False,
-    help="Install the OpenCode plugin into ./.opencode/plugin/ instead of the "
-    "user-level OpenCode config directory.",
+    help="Install the OpenCode plugin and Pi extension into ./.opencode/plugin/ "
+    "and ./.pi/extensions/ instead of the user-level config directories.",
 )
 @click.option(
     "--ci",
@@ -91,6 +92,7 @@ def init_cmd(
         ToolName.GEMINI_CLI: _configure_gemini_cli,
         ToolName.CODEX: _configure_codex_cli,
         ToolName.OPENCODE: lambda: _configure_opencode(project=project_scope),
+        ToolName.PI: lambda: _configure_pi(project=project_scope),
     }
 
     report = detect_all()
@@ -560,6 +562,31 @@ def _configure_opencode(*, project: bool = False) -> str:
 
     path = project_plugin_path() if project else global_plugin_path()
     result = install_plugin(path)
+    if not result.ok:
+        raise ConfigureRefusedError(result.message)
+    return f"{path} ({result.message})"
+
+
+def _configure_pi(*, project: bool = False) -> str:
+    """Install the Vectimus Pi extension.  Returns the line to report.
+
+    Installs to Pi's user-level agent directory by default so every project
+    is covered; ``--project`` puts it in ``./.pi/extensions/`` instead.  Both
+    can exist at once -- Pi's extension directories are a union, not a
+    fallback chain, so both extensions load and both run, which is redundant
+    but not harmful (the second check sees the same verdict).
+
+    Raises :class:`ConfigureRefusedError` when the file on disk is not one
+    Vectimus may overwrite.
+    """
+    from vectimus.cli.pi_extension import (
+        global_extension_path,
+        install_extension,
+        project_extension_path,
+    )
+
+    path = project_extension_path() if project else global_extension_path()
+    result = install_extension(path)
     if not result.ok:
         raise ConfigureRefusedError(result.message)
     return f"{path} ({result.message})"

@@ -153,6 +153,14 @@ def _check_opencode() -> str | None:
     return str(paths[-1]) if paths else None
 
 
+def _check_pi() -> str | None:
+    """Return the Vectimus Pi extension path, project copy preferred."""
+    from vectimus.cli.pi_extension import installed_extension_paths
+
+    paths = installed_extension_paths()
+    return str(paths[-1]) if paths else None
+
+
 _STATUS_CHECKS = {
     ToolName.CLAUDE_CODE: _check_claude_code,
     ToolName.CURSOR: _check_cursor,
@@ -160,6 +168,7 @@ _STATUS_CHECKS = {
     ToolName.GEMINI_CLI: _check_gemini_cli,
     ToolName.CODEX: _check_codex,
     ToolName.OPENCODE: _check_opencode,
+    ToolName.PI: _check_pi,
 }
 
 

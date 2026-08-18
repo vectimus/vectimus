@@ -1,8 +1,9 @@
 """Cross-platform detection of AI coding tools.
 
-Detects Claude Code, Cursor, VS Code/Copilot, Gemini CLI, Codex CLI and
-OpenCode across Windows, macOS and Linux. Checks PATH first for speed, then falls
-back to known installation directories and config directories per platform.
+Detects Claude Code, Cursor, VS Code/Copilot, Gemini CLI, Codex CLI,
+OpenCode and Pi across Windows, macOS and Linux. Checks PATH first for speed,
+then falls back to known installation directories and config directories per
+platform.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class ToolName(StrEnum):
     GEMINI_CLI = "gemini-cli"
     CODEX = "codex"
     OPENCODE = "opencode"
+    PI = "pi"
 
 
 class DetectionMethod(StrEnum):
@@ -72,6 +74,7 @@ TOOL_DISPLAY_NAMES: dict[ToolName, str] = {
     ToolName.GEMINI_CLI: "Gemini CLI",
     ToolName.CODEX: "Codex CLI",
     ToolName.OPENCODE: "OpenCode",
+    ToolName.PI: "Pi",
 }
 
 
@@ -99,6 +102,7 @@ def detect_all() -> DetectionReport:
     report.results[ToolName.GEMINI_CLI] = _detect_gemini_cli()
     report.results[ToolName.CODEX] = _detect_codex_cli()
     report.results[ToolName.OPENCODE] = _detect_opencode()
+    report.results[ToolName.PI] = _detect_pi()
     return report
 
 
@@ -111,6 +115,7 @@ def detect_tool(tool: ToolName) -> ToolDetectionResult:
         ToolName.GEMINI_CLI: _detect_gemini_cli,
         ToolName.CODEX: _detect_codex_cli,
         ToolName.OPENCODE: _detect_opencode,
+        ToolName.PI: _detect_pi,
     }
     return detectors[tool]()
 
@@ -377,6 +382,41 @@ def _detect_opencode() -> ToolDetectionResult:
     from vectimus.cli.opencode_plugin import opencode_config_dir
 
     config_dir = opencode_config_dir()
+    if config_dir.is_dir():
+        result.found = True
+        result.method = DetectionMethod.CONFIG_DIR
+        result.details = f"Config directory exists: {config_dir}"
+        return result
+
+    result.details = f"Not found on PATH or via {config_dir}/."
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Pi
+# ---------------------------------------------------------------------------
+
+
+def _detect_pi() -> ToolDetectionResult:
+    """Detect Pi via PATH or its config directory.
+
+    Pi installs a single ``pi`` binary (npm global, or the bundled binary
+    build).  Its agent config directory is ``~/.pi/agent`` -- note the
+    ``agent`` segment, which is where extensions live.
+    """
+    result = ToolDetectionResult(tool=ToolName.PI)
+
+    which = shutil.which("pi")
+    if which:
+        result.found = True
+        result.executable_path = which
+        result.method = DetectionMethod.PATH
+        result.details = f"Found on PATH: {which}"
+        return result
+
+    from vectimus.cli.pi_extension import pi_config_dir
+
+    config_dir = pi_config_dir()
     if config_dir.is_dir():
         result.found = True
         result.method = DetectionMethod.CONFIG_DIR

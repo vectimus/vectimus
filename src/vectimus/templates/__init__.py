@@ -13,6 +13,7 @@ from pathlib import Path
 TEMPLATES_DIR = Path(__file__).resolve().parent
 
 OPENCODE_PLUGIN = TEMPLATES_DIR / "opencode_plugin.ts"
+PI_EXTENSION = TEMPLATES_DIR / "pi_extension.ts"
 
 
 def read_template(path: Path) -> str:
