@@ -11,6 +11,7 @@ the tool table this enforces and the Pi source it was derived from.
 
 from __future__ import annotations
 
+import ntpath
 import posixpath
 import uuid
 from typing import Any
@@ -161,11 +162,14 @@ def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
     would report a pass it did not earn.  The extension always sends
     ``ctx.cwd``, so this only fires on a hand-built payload.
 
-    ``posixpath`` rather than ``os.path`` so a payload captured on one
-    platform normalises the same way on another; the shared
+    Both path flavours are recognised regardless of the host platform, so a
+    payload from a Windows session is read the same way on a Linux evaluation
+    server and vice versa.  Judging ``C:\\Users\\dev\\.ssh\\id_rsa`` by POSIX
+    rules alone would call it relative and join it onto the cwd, producing a
+    path that matches no rule at all -- a fail-open.  The shared
     ``_extract_file_path`` still does the traversal collapsing afterwards.
     """
-    if posixpath.isabs(raw):
+    if posixpath.isabs(raw) or ntpath.isabs(raw):
         return raw
     if cwd is None:
         raise PiNormalisationError(
@@ -173,7 +177,10 @@ def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
             f"resolve it against, so it cannot be matched against policy paths.  "
             f"See {DOC_URL}"
         )
-    return posixpath.join(cwd, raw)
+    # Join with the flavour the working directory is written in, so a Windows
+    # cwd keeps its separators instead of gaining a POSIX one.
+    flavour = ntpath if ntpath.isabs(cwd) and not posixpath.isabs(cwd) else posixpath
+    return flavour.join(cwd, raw)
 
 
 @register("pi")

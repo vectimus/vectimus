@@ -158,7 +158,10 @@ match a Pi `read` of `../.ssh/id_rsa`, and the call would be allowed on a
 technicality.
 
 The adapter closes that by resolving every relative path against the
-payload's `cwd` before normalisation.  A relative path with **no** `cwd`
+payload's `cwd` before normalisation.  Both POSIX and Windows path
+flavours count as absolute regardless of the host platform: judging
+`C:\Users\dev\.ssh\id_rsa` by POSIX rules alone would call it relative
+and join it onto the cwd, yielding a path that matches no rule at all.  A relative path with **no** `cwd`
 in the payload is denied: without the working directory the path cannot
 be made comparable to the paths policies are written against, and
 evaluating it anyway would report a pass it did not earn.  The extension

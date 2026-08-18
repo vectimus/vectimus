@@ -217,6 +217,23 @@ class TestPiRelativePaths:
         with pytest.raises(PiNormalisationError, match="cannot be matched against policy paths"):
             normalise(payload, "pi")
 
+    @pytest.mark.parametrize(
+        "raw",
+        [r"C:\Users\dev\.ssh\id_rsa", r"\\server\share\secrets.txt"],
+    )
+    def test_a_windows_path_is_recognised_as_absolute(self, raw: str) -> None:
+        """Judging it by POSIX rules alone would fail open.
+
+        `posixpath.isabs(r"C:\\...")` is False, so the path would be joined
+        onto the cwd instead, producing something that matches no rule at all.
+        """
+        event = normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
+        assert event.action.file_path == raw
+
+    def test_a_windows_relative_path_joins_with_windows_separators(self) -> None:
+        event = normalise(_payload("read", {"path": r"sub\notes.txt"}, cwd=r"C:\proj"), "pi")
+        assert event.action.file_path == r"C:\proj\sub\notes.txt"
+
     def test_a_bash_redirect_to_a_relative_path_is_resolved_too(self) -> None:
         event = normalise(_payload("bash", {"command": "echo x > out.txt"}, cwd="/proj"), "pi")
         assert event.action.file_path == "/proj/out.txt"
