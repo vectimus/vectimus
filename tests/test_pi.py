@@ -330,6 +330,80 @@ class TestPiWindowsPathsReachACedarDeny:
             normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
 
 
+class TestPackPatternsCanonicalisationNoLongerMatches:
+    """Canonicalising the path folds only one side of a case-sensitive match.
+
+    Cedar `like` is case-sensitive, and several packs spell their patterns the
+    way a Windows path used to arrive: uppercase (`*CLAUDE.md`) or
+    backslash-separated (`*\\Windows\\System32\\*`).  Lowercasing the path and
+    turning its separators around therefore does not just make new rules
+    match -- it stops those rules matching at all, and a write they denied
+    before canonicalisation is allowed after it.
+
+    The class above covers `.ssh`, which is spelled lowercase with forward
+    slashes and so is the one family that survives the fold.  These are the
+    five that do not, pinned as *strict* xfail: the suite stays green while
+    the gap is open, and the day the packs grow canonical spellings each one
+    turns into an XPASS failure that says so.  The fix is to delete the
+    marker, never the test.
+
+    Closing this means folding both sides -- every pattern meant to catch a
+    Windows path needs a lowercase, forward-slash form alongside the existing
+    one, which has to stay so POSIX paths (correctly not folded) keep matching
+    case-sensitively.
+    """
+
+    # The path, and the pack pattern that used to catch it.
+    CASES = [
+        (r"C:\proj\CLAUDE.md", '"*CLAUDE.md", file_integrity.cedar:201'),
+        (r"C:\proj\AGENTS.md", '"*AGENTS.md", file_integrity.cedar:202'),
+        (r"C:\proj\Cargo.lock", '"*Cargo.lock", supply_chain.cedar:74'),
+        (r"C:\Windows\System32\drv.sys", r'"*\Windows\System32\*", file_integrity.cedar:152'),
+        (r"C:\Windows\SysWOW64\x.dll", r'"*\Windows\SysWOW64\*", file_integrity.cedar:153'),
+    ]
+
+    @staticmethod
+    def _write_event(raw: str):
+        return normalise(_payload("write", {"path": raw, "content": "x"}, cwd=r"C:\proj"), "pi")
+
+    @pytest.mark.parametrize(("raw", "pattern"), CASES)
+    def test_the_uncanonicalised_spelling_is_what_the_pack_still_catches(
+        self, raw: str, pattern: str
+    ) -> None:
+        """Control, and the reason the xfail below is a regression.
+
+        Without this the xfail would be ambiguous: it could mean the path was
+        never covered by any rule.  Feeding the engine the spelling the
+        pattern was written for shows the rule is there and does deny -- so
+        what the fold changed is whether the path can reach it.
+        """
+        event = self._write_event(raw)
+        event.action.file_path = raw
+        decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
+        assert decision.decision == DecisionVerdict.DENY, (
+            f"expected {pattern} to deny the spelling it was written for; if this "
+            f"fails the pattern changed and the xfail below needs revisiting"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "pack patterns are spelled uppercase or backslash-separated, so none of "
+            "them can match a lowercased forward-slash path; needs the matching "
+            "canonical spellings adding to the packs"
+        ),
+    )
+    @pytest.mark.parametrize(("raw", "pattern"), CASES)
+    def test_a_write_denied_before_canonicalisation_is_denied_after_it(
+        self, raw: str, pattern: str
+    ) -> None:
+        decision = PolicyEngine(loader=PolicyLoader()).evaluate(self._write_event(raw))
+        assert decision.decision == DecisionVerdict.DENY, (
+            f"canonicalisation put this path beyond {pattern}, so a write the pack "
+            f"denies in its original spelling is now allowed"
+        )
+
+
 class TestPiNormaliserRefusals:
     """Everything the adapter refuses to guess at."""
 
