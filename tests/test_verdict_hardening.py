@@ -140,9 +140,10 @@ class TestServerPathVerdicts:
         assert result.exit_code == 2
         assert _extract_json(result.output)["permission"] == "deny"
 
-    def test_deny_verdict_with_smuggled_allow_payload_denies(self, tmp_path, monkeypatch) -> None:
-        """A server payload whose inner decision contradicts the deny verdict
-        must not be relayed -- the deny is rebuilt locally (fail closed)."""
+    def test_server_hook_output_is_never_relayed_deny(self, tmp_path, monkeypatch) -> None:
+        """The server's own hookSpecificOutput (real single-wrapped shape,
+        here carrying an 'allow') is never relayed; the deny is rebuilt
+        locally and wrapped correctly for Claude Code."""
         monkeypatch.chdir(tmp_path)
         exit_code, output = self._run(
             tmp_path,
@@ -150,56 +151,34 @@ class TestServerPathVerdicts:
                 DecisionVerdict.DENY,
                 reason="Blocked by policy",
                 hookSpecificOutput={
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "allow",
-                        "permissionDecisionReason": "looks fine",
-                    }
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "permissionDecisionReason": "looks fine",
                 },
             ),
         )
         inner = _assert_denied(exit_code, output)
         assert inner["permissionDecisionReason"] == "Blocked by policy"
 
-    @pytest.mark.parametrize(
-        "hook_output",
-        [
-            "not a dict",
-            {},
-            {"hookSpecificOutput": "not a dict"},
-            {"hookSpecificOutput": {"permissionDecision": "allow"}},
-            {"permissionDecision": "allow"},
-        ],
-    )
-    def test_deny_verdict_with_non_denying_payload_denies(
-        self, hook_output: object, tmp_path, monkeypatch
-    ) -> None:
+    def test_server_escalate_hard_denies_not_ask(self, tmp_path, monkeypatch) -> None:
+        """The server emits permissionDecision 'ask' for ESCALATE; v1 must
+        hard-deny, so the relayed 'ask' must never reach the agent."""
         monkeypatch.chdir(tmp_path)
         exit_code, output = self._run(
             tmp_path,
             _response(
-                DecisionVerdict.DENY, reason="Blocked by policy", hookSpecificOutput=hook_output
+                DecisionVerdict.ESCALATE,
+                reason="Needs approval",
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": "Needs approval",
+                },
             ),
         )
         inner = _assert_denied(exit_code, output)
-        assert inner["permissionDecisionReason"] == "Blocked by policy"
-
-    def test_deny_verdict_with_consistent_payload_is_relayed(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.chdir(tmp_path)
-        server_payload = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Server says no",
-            }
-        }
-        exit_code, output = self._run(
-            tmp_path, _response(DecisionVerdict.DENY, hookSpecificOutput=server_payload)
-        )
-        assert exit_code == 0
-        inner = _extract_json(output)["hookSpecificOutput"]
         assert inner["permissionDecision"] == "deny"
-        assert inner["permissionDecisionReason"] == "Server says no"
+        assert "ask" not in output.replace("Needs approval", "")
 
 
 class TestDaemonPathVerdicts:
