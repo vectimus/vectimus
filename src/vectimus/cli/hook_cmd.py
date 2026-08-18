@@ -364,6 +364,14 @@ def hook_cmd(source: str) -> None:
         reason = "Vectimus normalisation error (fail closed)"
         if source == "cursor":
             reason = "Normalisation error (fail closed)"
+        else:
+            from vectimus.adapters.opencode import OpenCodeNormalisationError
+
+            # The OpenCode adapter's refusals name the tool and point at the
+            # inventory doc, which is what the agent needs to act on the
+            # block.  The daemon path already passes this detail through.
+            if isinstance(exc, OpenCodeNormalisationError):
+                reason = f"Vectimus: {exc} (fail closed)"
         _emit_deny(source, payload, reason)
 
     loader = PolicyLoader(project_path=project_path)

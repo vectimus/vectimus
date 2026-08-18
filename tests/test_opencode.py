@@ -379,7 +379,18 @@ class TestOpenCodeHookCommand:
         monkeypatch.chdir(tmp_path)
         exit_code, output = _run_hook(_payload("mystery_tool", {"x": 1}, cwd=str(tmp_path)))
         assert exit_code == 0
-        assert _extract_json(output)["decision"] == "deny"
+        parsed = _extract_json(output)
+        assert parsed["decision"] == "deny"
+        # The agent needs to know which tool was refused, not just that
+        # something failed to normalise.
+        assert "mystery_tool" in parsed["reason"]
+        assert "docs/opencode-tool-inventory.md" in parsed["reason"]
+
+    def test_missing_argument_names_the_argument(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        exit_code, output = _run_hook(_payload("bash", {}, cwd=str(tmp_path)))
+        assert exit_code == 0
+        assert "'command'" in _extract_json(output)["reason"]
 
     def test_invalid_json_denies(self) -> None:
         exit_code, output = _run_hook("{not json")
@@ -560,24 +571,28 @@ class TestInitAndRemoveCommands:
     def test_configure_installs_globally(self, sandbox: Path) -> None:
         from vectimus.cli.init_cmd import _configure_opencode
 
-        assert _configure_opencode() is True
+        detail = _configure_opencode()
+        assert str(global_plugin_path()) in detail
         assert global_plugin_path().exists()
         assert not project_plugin_path().exists()
 
     def test_configure_project_scope_installs_locally(self, sandbox: Path) -> None:
         from vectimus.cli.init_cmd import _configure_opencode
 
-        assert _configure_opencode(project=True) is True
+        detail = _configure_opencode(project=True)
+        assert str(project_plugin_path()) in detail
         assert project_plugin_path().exists()
         assert not global_plugin_path().exists()
 
-    def test_configure_reports_failure_when_it_refuses(self, sandbox: Path) -> None:
-        from vectimus.cli.init_cmd import _configure_opencode
+    def test_configure_raises_rather_than_failing_quietly(self, sandbox: Path) -> None:
+        """A refused install must not be counted as a configured tool."""
+        from vectimus.cli.init_cmd import ConfigureRefusedError, _configure_opencode
 
         path = global_plugin_path()
         path.parent.mkdir(parents=True)
         path.write_text("export const Mine = async () => ({})\n")
-        assert _configure_opencode() is False
+        with pytest.raises(ConfigureRefusedError):
+            _configure_opencode()
 
     def test_remove_deletes_both_installs(self, sandbox: Path) -> None:
         from vectimus.cli.remove_cmd import remove_cmd

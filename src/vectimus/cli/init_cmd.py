@@ -21,6 +21,15 @@ from vectimus.cli.opencode_plugin import global_plugin_path
 from vectimus.engine.config import VectimusConfig
 from vectimus.engine.loader import PolicyLoader
 
+
+class ConfigureRefusedError(Exception):
+    """A detected tool could not be configured, and why.
+
+    Raised rather than returned so a configure function cannot fail quietly
+    and still be counted as configured.
+    """
+
+
 # Maps tool names to display labels and to what a successful configure writes.
 # OpenCode is the odd one out: it has no hooks config to merge into, so
 # Vectimus installs a plugin file instead.
@@ -100,8 +109,11 @@ def init_cmd(
                     click.echo(f"      {result.executable_path}")
                 continue
             method_label = f"({result.method.value})" if result.method else ""
-            if configure_fns[tool_name]() is False:
+            try:
+                detail = configure_fns[tool_name]()
+            except ConfigureRefusedError as exc:
                 click.echo(f"  [ ] {display_name:<18} {method_label:<8} not configured")
+                click.echo(f"      {exc}", err=True)
                 continue
             tools_configured.append(tool_name.value)
             click.echo(f"  [+] {display_name:<18} {method_label:<8} {artefact}")
@@ -109,6 +121,8 @@ def init_cmd(
                 click.echo(f"      {result.executable_path}")
             if tool_name == ToolName.COPILOT and result.has_copilot_extension:
                 click.echo("      Copilot extension detected")
+            if detail:
+                click.echo(f"      {detail}")
         else:
             click.echo(f"  [ ] {display_name:<18} not found")
 
@@ -530,24 +544,25 @@ def _configure_codex_cli() -> None:
     _enable_codex_hooks_feature(config_path)
 
 
-def _configure_opencode(*, project: bool = False) -> bool:
-    """Install the Vectimus OpenCode plugin.  Returns whether it is in place.
+def _configure_opencode(*, project: bool = False) -> str:
+    """Install the Vectimus OpenCode plugin.  Returns the line to report.
 
     Installs to the user-level OpenCode config directory by default so every
     project is covered; ``--project`` puts it in ``./.opencode/plugin/``
     instead.  Both can exist at once -- OpenCode's config directories are a
     union, not a fallback chain, so both plugins load and both run, which is
     redundant but not harmful (the second check sees the same verdict).
+
+    Raises :class:`ConfigureRefusedError` when the file on disk is not one
+    Vectimus may overwrite.
     """
     from vectimus.cli.opencode_plugin import install_plugin, project_plugin_path
 
     path = project_plugin_path() if project else global_plugin_path()
     result = install_plugin(path)
     if not result.ok:
-        click.echo(f"      {result.message}", err=True)
-        return False
-    click.echo(f"      {path} ({result.message})")
-    return True
+        raise ConfigureRefusedError(result.message)
+    return f"{path} ({result.message})"
 
 
 def _prompt_mcp_servers(
