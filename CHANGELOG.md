@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OpenCode support (#22). `vectimus init` installs a plugin into OpenCode's user-level config directory (`--project` puts it in `./.opencode/plugin/` instead) that pipes every tool call through `vectimus hook --source opencode`. A call is allowed only when the hook exits 0 with empty stdout; a deny payload, unparseable output, a non-zero exit, a signal, a missing `vectimus` binary or a 30-second deadline all throw, which is the only way an OpenCode plugin can block. Covers every built-in tool -- shell, reads, writes, patches, glob/grep, web fetch and search, subagent spawns. See [docs/opencode.md](docs/opencode.md).
 - `docs/opencode-tool-inventory.md`: the OpenCode tool name -> argument schema -> action type table, derived from the OpenCode v1.18.18 source, with the file and symbol each fact came from.
+- Pi support (#51). `vectimus init` installs an extension into `~/.pi/agent/extensions/` (`--project` puts it in `./.pi/extensions/` instead) that pipes every tool call through `vectimus hook --source pi`. A call is allowed only when the hook exits 0 with empty stdout; everything else blocks. Covers all seven built-in tools -- `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`. See [docs/pi.md](docs/pi.md).
+- `docs/pi-tool-inventory.md`: the Pi tool name -> argument schema -> action type table, derived from the installed `@mariozechner/pi-coding-agent` 0.73.1 package and from payloads captured in a live session, with the file and symbol each fact came from.
 
 ### Fixed
 
@@ -22,8 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Under OpenCode, MCP *tool* calls are blocked rather than evaluated: OpenCode names them `sanitize(server)_sanitize(tool)`, which cannot be split back into a server and a tool name. The shipped `vectimus-mcp-001` rule already denies unapproved servers, so this only costs coverage for servers you had approved. MCP *resource* tools (`read_mcp_resource` and friends) evaluate normally.
 - Under OpenCode, `apply_patch` calls that touch more than one file are blocked: one evaluation carries one file path, so a multi-file patch could carry an innocuous path past a path rule while writing the rest.
 - Escalate is a hard block under OpenCode, matching Claude Code (#53). Real escalation via `permission.ask` is a follow-up.
-- After upgrading, stop the daemon (`vectimus daemon stop`; the next hook call starts a fresh one): one left running from an older install has the old adapters loaded and denies `--source opencode` as an unknown source.
-- Before downgrading below 0.23.0, run `vectimus remove`. A 0.23 OpenCode plugin talking to a CLI without the `opencode` source fails closed on every tool call -- by design, but it looks like the agent has locked up.
+- Issue #51 described Pi's hook payload as Claude-compatible. It is not: the event is `tool_call` carrying `toolName`/`input`, the file argument is `path` rather than `file_path`, and `edit` takes an array of replacements. The extension translates; no Claude adapter is reused.
+- Pi passes tool paths through exactly as the model wrote them, so relative paths are routine. Both the extension and the adapter resolve them against the session working directory, because a relative path matches none of the absolute patterns policies use. A relative path arriving with no working directory is blocked rather than evaluated.
+- Escalate is a hard block under Pi too. Pi extensions can prompt via `ctx.ui.confirm`, but only in interactive mode, and a guard that stops asking under `-p` or RPC is worse than one that consistently blocks (#53).
+- Pi has no MCP subsystem and no web or subagent tools, so those rule packs never fire under Pi. Tools registered by other Pi extensions are blocked, having no known argument schema.
+- After upgrading, stop the daemon (`vectimus daemon stop`; the next hook call starts a fresh one): one left running from an older install has the old adapters loaded and denies `--source opencode` and `--source pi` as unknown sources.
+- Before downgrading below 0.23.0, run `vectimus remove`. A 0.23 OpenCode plugin or Pi extension talking to a CLI without the matching source fails closed on every tool call -- by design, but it looks like the agent has locked up.
 
 ## [0.22.2] - 2026-07-02
 

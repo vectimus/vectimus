@@ -98,9 +98,9 @@ The entire pipeline is governed by Vectimus itself. The agents that write govern
 
 ### Coding tools
 
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [Cursor](https://www.cursor.com/) | [GitHub Copilot](https://github.com/features/copilot) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | [Codex CLI](https://developers.openai.com/codex/hooks) | [OpenCode](https://opencode.ai/) |
-|:-----------:|:------:|:--------------:|:----------:|:---------:|:---------:|
-| ✅ | ✅ | ✅ | ✅ | Experimental | Experimental |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [Cursor](https://www.cursor.com/) | [GitHub Copilot](https://github.com/features/copilot) | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | [Codex CLI](https://developers.openai.com/codex/hooks) | [OpenCode](https://opencode.ai/) | [Pi](https://pi.dev/) |
+|:-----------:|:------:|:--------------:|:----------:|:---------:|:---------:|:---------:|
+| ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | Experimental |
 
 Codex CLI support is experimental. Codex only exposes Bash shell calls to hooks today, so
 Vectimus cannot intercept file reads, writes or MCP calls made by Codex. That limit comes from
@@ -111,6 +111,10 @@ OpenCode support is experimental and covers every built-in tool -- shell, file r
 writes, patches, web fetches and subagent spawns. MCP tool calls are blocked rather than
 evaluated, because OpenCode's tool naming does not say which server a call belongs to.
 See [docs/opencode.md](docs/opencode.md).
+
+Pi support is experimental and covers all seven of its built-in tools -- `bash`, `read`,
+`write`, `edit`, `grep`, `find` and `ls`. Pi has no MCP, web or subagent tools, so there is
+nothing else to cover. See [docs/pi.md](docs/pi.md).
 
 ### Agent frameworks
 
