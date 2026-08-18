@@ -73,7 +73,12 @@ forbid (
     context.file_path like "*uv.lock" ||
     context.file_path like "*Cargo.lock" ||
     context.file_path like "*Gemfile.lock" ||
-    context.file_path like "*composer.lock"
+    context.file_path like "*composer.lock" ||
+    // Canonicalised Windows form: the Pi adapter lowercases and forward-slashes
+    // Windows paths for a POSIX evaluator, so these lockfiles arrive lowercased.
+    context.file_path like "*pipfile.lock" ||
+    context.file_path like "*cargo.lock" ||
+    context.file_path like "*gemfile.lock"
 };
 
 @id("vectimus-supchain-006")

@@ -30,7 +30,10 @@ forbid (
     resource
 ) when {
     context.file_path like "*prod*Dockerfile*" ||
-    context.file_path like "*prod*docker-compose*"
+    context.file_path like "*prod*docker-compose*" ||
+    // Canonicalised Windows form: the Pi adapter lowercases and forward-slashes
+    // Windows paths for a POSIX evaluator, so `Dockerfile` arrives as `dockerfile`.
+    context.file_path like "*prod*dockerfile*"
 };
 
 // ---------------------------------------------------------------------------
@@ -151,7 +154,11 @@ forbid (
     // Windows system directories
     context.file_path like "*\\Windows\\System32\\*" ||
     context.file_path like "*\\Windows\\SysWOW64\\*" ||
-    context.file_path like "*\\Windows\\system32\\*"
+    context.file_path like "*\\Windows\\system32\\*" ||
+    // Canonicalised Windows form: the Pi adapter lowercases and forward-slashes
+    // Windows paths for a POSIX evaluator (System32/system32 both fold here).
+    context.file_path like "*/windows/system32/*" ||
+    context.file_path like "*/windows/syswow64/*"
 };
 
 @id("vectimus-fileint-010")
@@ -200,6 +207,10 @@ forbid (
 ) when {
     context.file_path like "*CLAUDE.md" ||
     context.file_path like "*AGENTS.md" ||
+    // Canonicalised Windows form: the Pi adapter lowercases and forward-slashes
+    // Windows paths for a POSIX evaluator, so `CLAUDE.md`/`AGENTS.md` arrive lowercased.
+    context.file_path like "*claude.md" ||
+    context.file_path like "*agents.md" ||
     context.file_path like "*.cursorrules" ||
     context.file_path like "*.github/copilot-instructions.md" ||
     context.file_path like "*.windsurfrules" ||

@@ -59,6 +59,25 @@ def _extract_json(output: str) -> dict:
     raise ValueError(f"No JSON found in output: {output!r}")
 
 
+# The vendored packs under ./policies are what this change edits.  A default
+# PolicyLoader() also layers in a downloaded ~/.vectimus/policy-cache when one
+# exists, and the cache takes precedence -- so on a machine with a stale cache it
+# would be evaluated instead of the packs under test.  Tests that assert on the
+# newly-added companion patterns therefore load the vendored packs explicitly.
+# (The same companions must land upstream/API for a synced cache to gain them --
+# see the sync note accompanying this change.)
+_BUNDLED_POLICIES = Path(__file__).resolve().parents[1] / "policies"
+
+
+def _bundled_engine(*, extra_disabled_rules: set[str] | None = None) -> PolicyEngine:
+    return PolicyEngine(
+        loader=PolicyLoader(
+            policy_dirs=[str(_BUNDLED_POLICIES)],
+            extra_disabled_rules=extra_disabled_rules or set(),
+        )
+    )
+
+
 @pytest.fixture()
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect Pi's config dir and cwd into tmp_path.
@@ -330,77 +349,103 @@ class TestPiWindowsPathsReachACedarDeny:
             normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
 
 
-class TestPackPatternsCanonicalisationNoLongerMatches:
-    """Canonicalising the path folds only one side of a case-sensitive match.
+class TestPackPatternsMatchCanonicalisedWindowsPaths:
+    """Folding both sides: a canonicalised Windows write still hits its rule.
 
-    Cedar `like` is case-sensitive, and several packs spell their patterns the
-    way a Windows path used to arrive: uppercase (`*CLAUDE.md`) or
-    backslash-separated (`*\\Windows\\System32\\*`).  Lowercasing the path and
-    turning its separators around therefore does not just make new rules
-    match -- it stops those rules matching at all, and a write they denied
-    before canonicalisation is allowed after it.
+    Cedar `like` is case-sensitive, and several packs spell their path patterns
+    the way a Windows path used to arrive -- uppercase (`*CLAUDE.md`) or
+    backslash-separated (`*\\Windows\\System32\\*`).  The Pi adapter lowercases
+    and forward-slashes Windows paths for a POSIX evaluator, so those native
+    spellings alone would stop matching: lowercasing the path does not merely let
+    new rules match, it stops the native ones matching at all, and a write the
+    pack denied before canonicalisation would be allowed after it.
 
-    The class above covers `.ssh`, which is spelled lowercase with forward
-    slashes and so is the one family that survives the fold.  These are the
-    five that do not, pinned as *strict* xfail: the suite stays green while
-    the gap is open, and the day the packs grow canonical spellings each one
-    turns into an XPASS failure that says so.  The fix is to delete the
-    marker, never the test.
+    The packs now carry a lowercase, forward-slash companion beside each such
+    pattern.  These tests prove the companion closes the gap -- a Windows write
+    the pack denies in its native spelling is still denied once canonicalised --
+    and, via per-case anti-vacuity, that the *named* rule's companion is what
+    denies it rather than some blanket rule.  A separate control proves the
+    native spelling still denies, so the companion was added, not swapped in.
 
-    Closing this means folding both sides -- every pattern meant to catch a
-    Windows path needs a lowercase, forward-slash form alongside the existing
-    one, which has to stay so POSIX paths (correctly not folded) keep matching
-    case-sensitively.
+    `.ssh` (TestPiWindowsPathsReachACedarDeny) is already lowercase/forward-slash
+    and survives the fold untouched; these are the families that did not.
     """
 
-    # The path, and the pack pattern that used to catch it.
+    # (Windows path, cwd, the rule whose companion must catch the canonical form).
+    # Every path canonicalises to lowercase/forward-slash and must reach `rule`.
     CASES = [
-        (r"C:\proj\CLAUDE.md", '"*CLAUDE.md", file_integrity.cedar:201'),
-        (r"C:\proj\AGENTS.md", '"*AGENTS.md", file_integrity.cedar:202'),
-        (r"C:\proj\Cargo.lock", '"*Cargo.lock", supply_chain.cedar:74'),
-        (r"C:\Windows\System32\drv.sys", r'"*\Windows\System32\*", file_integrity.cedar:152'),
-        (r"C:\Windows\SysWOW64\x.dll", r'"*\Windows\SysWOW64\*", file_integrity.cedar:153'),
+        (r"C:\proj\CLAUDE.md", r"C:\proj", "vectimus-fileint-011"),
+        (r"C:\proj\AGENTS.md", r"C:\proj", "vectimus-fileint-011"),
+        (r"C:\proj\Cargo.lock", r"C:\proj", "vectimus-supchain-005"),
+        (r"C:\proj\Pipfile.lock", r"C:\proj", "vectimus-supchain-005"),
+        (r"C:\proj\Gemfile.lock", r"C:\proj", "vectimus-supchain-005"),
+        (r"C:\Windows\System32\drv.sys", r"C:\proj", "vectimus-fileint-009"),
+        (r"C:\Windows\SysWOW64\x.dll", r"C:\proj", "vectimus-fileint-009"),
+        (r"C:\prod\Dockerfile", r"C:\proj", "vectimus-fileint-002"),
+    ]
+
+    # The native (un-canonicalised) spelling each companion sits beside.  POSIX
+    # paths are not folded, and native Windows spellings are injected directly
+    # (the adapter would fold them), so either way the *original* pattern is what
+    # is exercised -- proving the companion was added alongside it, not in place
+    # of it.
+    NATIVE_CASES = [
+        ("/proj/CLAUDE.md", "vectimus-fileint-011"),
+        ("/proj/AGENTS.md", "vectimus-fileint-011"),
+        ("/proj/Cargo.lock", "vectimus-supchain-005"),
+        ("/proj/Pipfile.lock", "vectimus-supchain-005"),
+        ("/proj/Gemfile.lock", "vectimus-supchain-005"),
+        (r"C:\Windows\System32\drv.sys", "vectimus-fileint-009"),
+        (r"C:\Windows\SysWOW64\x.dll", "vectimus-fileint-009"),
+        ("/proj/prod/Dockerfile", "vectimus-fileint-002"),
     ]
 
     @staticmethod
-    def _write_event(raw: str):
-        return normalise(_payload("write", {"path": raw, "content": "x"}, cwd=r"C:\proj"), "pi")
+    def _write_event(raw: str, cwd: str):
+        return normalise(_payload("write", {"path": raw, "content": "x"}, cwd=cwd), "pi")
 
-    @pytest.mark.parametrize(("raw", "pattern"), CASES)
-    def test_the_uncanonicalised_spelling_is_what_the_pack_still_catches(
-        self, raw: str, pattern: str
+    @pytest.mark.parametrize(("raw", "cwd", "rule"), CASES)
+    def test_a_canonicalised_windows_write_is_denied_by_the_companion(
+        self, raw: str, cwd: str, rule: str
     ) -> None:
-        """Control, and the reason the xfail below is a regression.
-
-        Without this the xfail would be ambiguous: it could mean the path was
-        never covered by any rule.  Feeding the engine the spelling the
-        pattern was written for shows the rule is there and does deny -- so
-        what the fold changed is whether the path can reach it.
-        """
-        event = self._write_event(raw)
-        event.action.file_path = raw
-        decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
-        assert decision.decision == DecisionVerdict.DENY, (
-            f"expected {pattern} to deny the spelling it was written for; if this "
-            f"fails the pattern changed and the xfail below needs revisiting"
+        """The write goes through the adapter (which canonicalises the path) and
+        the engine, and the rule that owns the companion is what denies it."""
+        decision = _bundled_engine().evaluate(self._write_event(raw, cwd))
+        assert decision.decision == DecisionVerdict.DENY
+        assert rule in decision.matched_policy_ids, (
+            f"canonicalised {raw!r} must be denied by {rule}'s companion pattern"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "pack patterns are spelled uppercase or backslash-separated, so none of "
-            "them can match a lowercased forward-slash path; needs the matching "
-            "canonical spellings adding to the packs"
-        ),
-    )
-    @pytest.mark.parametrize(("raw", "pattern"), CASES)
-    def test_a_write_denied_before_canonicalisation_is_denied_after_it(
-        self, raw: str, pattern: str
+    @pytest.mark.parametrize(("raw", "cwd", "rule"), CASES)
+    def test_the_deny_comes_from_that_rule_and_not_a_blanket_one(
+        self, raw: str, cwd: str, rule: str
     ) -> None:
-        decision = PolicyEngine(loader=PolicyLoader()).evaluate(self._write_event(raw))
-        assert decision.decision == DecisionVerdict.DENY, (
-            f"canonicalisation put this path beyond {pattern}, so a write the pack "
-            f"denies in its original spelling is now allowed"
+        """Anti-vacuity: disable the owning rule and the write must be allowed.
+
+        Without this the denies above would keep passing if the companion were
+        deleted and some unrelated catch-all blocked instead -- they would say
+        nothing about whether the companion actually catches the canonical path.
+        """
+        engine = _bundled_engine(extra_disabled_rules={rule})
+        assert engine.evaluate(self._write_event(raw, cwd)).decision == DecisionVerdict.ALLOW, (
+            f"with {rule} disabled the canonicalised Windows write of {raw!r} must be "
+            "allowed, otherwise the deny proves nothing about that rule's companion"
+        )
+
+    @pytest.mark.parametrize(("raw", "rule"), NATIVE_CASES)
+    def test_the_native_spelling_still_denies(self, raw: str, rule: str) -> None:
+        """Control: adding a companion must not disturb the pattern it sits beside.
+
+        The path is injected directly onto the event (POSIX paths are not folded;
+        native Windows spellings the adapter would fold are set explicitly), so the
+        original uppercase/backslash pattern is what has to match.
+        """
+        event = self._write_event("/proj/x", "/proj")
+        event.action.file_path = raw
+        decision = _bundled_engine().evaluate(event)
+        assert decision.decision == DecisionVerdict.DENY
+        assert rule in decision.matched_policy_ids, (
+            f"native spelling {raw!r} must still be denied by {rule}"
         )
 
 
