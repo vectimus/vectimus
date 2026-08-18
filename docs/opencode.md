@@ -150,10 +150,10 @@ dedicated fix; several also affect the older adapters.
 - **Unscoped recursive reads.** `grep` and `glob` invoked without a `path`
   read the working directory recursively, but the event carries no path, so
   path policies do not match the effective scope
-  ([#71](https://github.com/vectimus/vectimus/issues/71)).
+  ([#75](https://github.com/vectimus/vectimus/issues/75)).
 - **Unscoped MCP resource listing.** `list_mcp_resources` /
   `list_mcp_resource_templates` carry no server, so the MCP server allowlist
-  does not constrain them ([#73](https://github.com/vectimus/vectimus/issues/73)).
+  does not constrain them ([#77](https://github.com/vectimus/vectimus/issues/77)).
 - **Symlinked paths** are matched lexically, so a link into a protected
   directory is judged on the link's own path
-  ([#74](https://github.com/vectimus/vectimus/issues/74); product-wide).
+  ([#78](https://github.com/vectimus/vectimus/issues/78); product-wide).
