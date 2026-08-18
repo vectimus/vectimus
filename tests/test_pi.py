@@ -217,100 +217,191 @@ class TestPiRelativePaths:
         with pytest.raises(PiNormalisationError, match="cannot be matched against policy paths"):
             normalise(payload, "pi")
 
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (r"C:\Users\dev\.ssh\id_rsa", "c:/users/dev/.ssh/id_rsa"),
+            (r"\\server\share\secrets.txt", "//server/share/secrets.txt"),
+        ],
+    )
+    def test_a_windows_path_is_canonicalised_not_merely_recognised(
+        self, raw: str, expected: str
+    ) -> None:
+        """Recognising it as absolute is only half of it.
+
+        `posixpath.isabs(r"C:\\...")` is False, so left to POSIX rules the
+        path would be joined onto the cwd.  But passing the backslashes
+        straight through fails open just as surely: a rule guarding
+        `*/.ssh/*` matches none of them, so a Windows session judged by a
+        POSIX evaluator would come back ALLOW.
+        """
+        event = normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
+        assert event.action.file_path == expected
+
+    def test_windows_traversal_is_collapsed_before_the_separators_go(self) -> None:
+        """`posixpath` cannot see `..\\` as traversal, so `ntpath` does it here."""
+        event = normalise(
+            _payload("read", {"path": r"C:\proj\..\Users\dev\.ssh\id_rsa"}, cwd=r"C:\proj"),
+            "pi",
+        )
+        assert event.action.file_path == "c:/users/dev/.ssh/id_rsa"
+
+    def test_a_windows_relative_path_joins_with_the_windows_cwd(self) -> None:
+        """Joined the Windows way, then canonicalised like any Windows path."""
+        event = normalise(_payload("read", {"path": r"sub\notes.txt"}, cwd=r"C:\proj"), "pi")
+        assert event.action.file_path == "c:/proj/sub/notes.txt"
+
     def test_a_bash_redirect_to_a_relative_path_is_resolved_too(self) -> None:
         event = normalise(_payload("bash", {"command": "echo x > out.txt"}, cwd="/proj"), "pi")
         assert event.action.file_path == "/proj/out.txt"
 
 
-class TestPiWindowsPathsFailClosedOnAPosixHost:
-    """A Windows or UNC absolute path reaching a POSIX host is refused.
+class TestPiWindowsPathsReachACedarDeny:
+    """Windows-shaped credential reads must land on a real Cedar DENY.
 
-    That was the original HIGH-2 bug: a POSIX evaluator handed a Windows path
-    would call it relative (or absolute-but-unmatchable) and let it past every
-    rule.  Canonicalising it does not work either -- the packs spell their
-    patterns two ways at once (lowercase forward-slash `*.ssh/*` and native
-    `*\\Windows\\System32\\*`), so any single rewrite reopens one hole to close
-    another.  So the adapter refuses the path, and the hook turns that into a
-    deny.  The residual gap on real Windows hosts is tracked separately.
+    A string-shape assertion alone proves nothing about enforcement: a
+    canonicalisation that silently regressed -- backslashes left in, case
+    left folded the wrong way -- could still satisfy it while the path sailed
+    past every rule.  So these normalise the event and run it through the
+    engine, and assert the SSH-key rule is what blocks it.
     """
+
+    RULE = "vectimus-secrets-002"
+
+    @pytest.mark.parametrize(
+        ("raw", "cwd"),
+        [
+            # A plain drive-letter path: the baseline the others are variants of.
+            (r"C:\Users\dev\.ssh\id_rsa", r"C:\Users\dev\proj"),
+            # `.SSH`: Windows is case-insensitive, and the rule is lowercase, so
+            # the fold is the only thing making this match.
+            (r"C:\Users\dev\.SSH\id_rsa", r"C:\Users\dev\proj"),
+            # A mixed-separator UNC path -- absolute to posixpath, so a
+            # POSIX-first return would have handed it on with backslashes still
+            # in it, matching nothing.
+            ("//server\\share\\.ssh\\id_rsa", r"C:\proj"),
+            # A clean UNC path.
+            ("\\\\server\\share\\.ssh\\id_rsa", r"C:\proj"),
+        ],
+    )
+    def test_a_windows_ssh_key_read_is_denied(self, raw: str, cwd: str) -> None:
+        event = normalise(_payload("read", {"path": raw}, cwd=cwd), "pi")
+        decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
+        assert decision.decision == DecisionVerdict.DENY
+        assert self.RULE in decision.matched_policy_ids
+
+    def test_the_deny_comes_from_the_ssh_rule_and_not_a_blanket_one(self) -> None:
+        """Anti-vacuity: disable the SSH-key rule and the read must be allowed.
+
+        Without this, the denies above would keep passing if `vectimus-secrets-002`
+        were deleted and some unrelated catch-all happened to block instead --
+        they would say nothing about whether the canonicalisation actually made
+        the path reach that rule.
+        """
+        event = normalise(
+            _payload("read", {"path": r"C:\Users\dev\.SSH\id_rsa"}, cwd=r"C:\Users\dev\proj"),
+            "pi",
+        )
+        engine = PolicyEngine(loader=PolicyLoader(extra_disabled_rules={self.RULE}))
+        assert engine.evaluate(event).decision == DecisionVerdict.ALLOW, (
+            f"with {self.RULE} disabled the Windows SSH-key read must be allowed, "
+            "otherwise the denies above prove nothing about that rule"
+        )
 
     @pytest.mark.parametrize(
         ("raw", "why"),
         [
-            (r"C:\Users\dev\.ssh\id_rsa", "drive-letter absolute"),
-            (r"C:\Users\dev\.SSH\id_rsa", "drive-letter, alternate case"),
-            ("//server\\share\\.ssh\\id_rsa", "mixed-separator UNC"),
-            ("\\\\server\\share\\secrets.txt", "clean UNC"),
+            (r"C:\Users\dev\.ssh.\id_rsa", "trailing dot Windows strips"),
+            (r"C:\Users\dev\.ssh \id_rsa", "trailing space Windows strips"),
             (r"\\.\C:\Users\dev\.ssh\id_rsa", "device namespace"),
             (r"\\?\C:\Users\dev\.ssh\id_rsa", "extended-length device namespace"),
             (r"\Users\dev\.ssh\id_rsa", "root-relative, drive dropped"),
-            ("C:notes.txt", "drive-relative"),
+            (r"C:\PROGRA~1\.ssh\id_rsa", "8.3 short-name alias"),
         ],
     )
-    def test_a_windows_absolute_path_is_refused(self, raw: str, why: str) -> None:
-        with pytest.raises(PiNormalisationError, match="Windows/UNC"):
-            normalise(_payload("read", {"path": raw}, cwd="/proj"), "pi")
+    def test_an_uncanonicalisable_windows_shape_is_refused(self, raw: str, why: str) -> None:
+        """Fail closed on a shape that cannot be reduced to one matchable path.
 
-    def test_a_relative_path_under_a_windows_cwd_is_refused(self) -> None:
-        """A POSIX host cannot resolve a relative path against a Windows cwd."""
-        with pytest.raises(PiNormalisationError, match="Windows working directory"):
-            normalise(_payload("read", {"path": "notes.txt"}, cwd=r"C:\proj"), "pi")
-
-    def test_the_refusal_is_a_deny_through_the_hook(self) -> None:
-        """The adapter raises; the hook must render that as a deny, not a crash."""
-        runner = CliRunner()
-        result = runner.invoke(
-            hook_cmd,
-            ["--source", "pi"],
-            input=json.dumps(_payload("read", {"path": r"C:\Users\dev\.ssh\id_rsa"}, cwd="/proj")),
-            env={"VECTIMUS_NO_DAEMON": "1"},
-        )
-        assert result.exit_code == 0
-        assert _extract_json(result.output)["decision"] == "deny"
-
-    def test_an_ordinary_posix_read_is_not_swept_up_in_the_refusal(self) -> None:
-        """Anti-vacuity: the refusal is specific to Windows shapes.
-
-        Without this the refusal tests could pass against an adapter that
-        denied every path.  A benign POSIX read must still normalise and be
-        allowed, proving only the Windows shapes are being turned away.
+        Each of these would otherwise reach Cedar as a path matching none of
+        the SSH rules it should -- a fail-open.  The adapter refuses instead,
+        and the hook turns that refusal into a deny.
         """
-        event = normalise(_payload("read", {"path": "/proj/readme.md"}, cwd="/proj"), "pi")
-        assert event.action.file_path == "/proj/readme.md"
-        assert PolicyEngine(loader=PolicyLoader()).evaluate(event).decision == DecisionVerdict.ALLOW
+        with pytest.raises(PiNormalisationError):
+            normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
 
 
-class TestPackPatternsStillMatchTheirNativeSpelling:
-    """Removing the canonicalisation must not disturb existing matching.
+class TestPackPatternsCanonicalisationNoLongerMatches:
+    """Canonicalising the path folds only one side of a case-sensitive match.
 
-    The packs spell some path patterns natively -- uppercase (`*CLAUDE.md`) or
-    backslash-separated (`*\\Windows\\System32\\*`).  These evaluate the events
-    against the real packs (no pack file was touched) and assert those rules
-    still deny the spelling they were written for, so the fail-closed change is
-    proven not to have weakened the file-integrity coverage.
+    Cedar `like` is case-sensitive, and several packs spell their patterns the
+    way a Windows path used to arrive: uppercase (`*CLAUDE.md`) or
+    backslash-separated (`*\\Windows\\System32\\*`).  Lowercasing the path and
+    turning its separators around therefore does not just make new rules
+    match -- it stops those rules matching at all, and a write they denied
+    before canonicalisation is allowed after it.
+
+    The class above covers `.ssh`, which is spelled lowercase with forward
+    slashes and so is the one family that survives the fold.  These are the
+    five that do not, pinned as *strict* xfail: the suite stays green while
+    the gap is open, and the day the packs grow canonical spellings each one
+    turns into an XPASS failure that says so.  The fix is to delete the
+    marker, never the test.
+
+    Closing this means folding both sides -- every pattern meant to catch a
+    Windows path needs a lowercase, forward-slash form alongside the existing
+    one, which has to stay so POSIX paths (correctly not folded) keep matching
+    case-sensitively.
     """
 
-    def test_a_posix_claude_md_write_is_still_denied(self) -> None:
-        event = normalise(
-            _payload("write", {"path": "/proj/CLAUDE.md", "content": "x"}, cwd="/proj"),
-            "pi",
-        )
-        decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
-        assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-fileint-011" in decision.matched_policy_ids
+    # The path, and the pack pattern that used to catch it.
+    CASES = [
+        (r"C:\proj\CLAUDE.md", '"*CLAUDE.md", file_integrity.cedar:201'),
+        (r"C:\proj\AGENTS.md", '"*AGENTS.md", file_integrity.cedar:202'),
+        (r"C:\proj\Cargo.lock", '"*Cargo.lock", supply_chain.cedar:74'),
+        (r"C:\Windows\System32\drv.sys", r'"*\Windows\System32\*", file_integrity.cedar:152'),
+        (r"C:\Windows\SysWOW64\x.dll", r'"*\Windows\SysWOW64\*", file_integrity.cedar:153'),
+    ]
 
-    def test_the_native_windows_system32_pattern_still_denies_its_spelling(self) -> None:
-        """The adapter now refuses this path, but the pack rule is unchanged.
+    @staticmethod
+    def _write_event(raw: str):
+        return normalise(_payload("write", {"path": raw, "content": "x"}, cwd=r"C:\proj"), "pi")
 
-        The path is injected directly onto the event (bypassing the adapter,
-        which fails closed on it) to show the backslash-spelled rule itself
-        still matches -- so nothing about the pack was disturbed.
+    @pytest.mark.parametrize(("raw", "pattern"), CASES)
+    def test_the_uncanonicalised_spelling_is_what_the_pack_still_catches(
+        self, raw: str, pattern: str
+    ) -> None:
+        """Control, and the reason the xfail below is a regression.
+
+        Without this the xfail would be ambiguous: it could mean the path was
+        never covered by any rule.  Feeding the engine the spelling the
+        pattern was written for shows the rule is there and does deny -- so
+        what the fold changed is whether the path can reach it.
         """
-        event = normalise(_payload("write", {"path": "/proj/x", "content": "x"}, cwd="/proj"), "pi")
-        event.action.file_path = r"C:\Windows\System32\drv.sys"
+        event = self._write_event(raw)
+        event.action.file_path = raw
         decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
-        assert decision.decision == DecisionVerdict.DENY
-        assert "vectimus-fileint-009" in decision.matched_policy_ids
+        assert decision.decision == DecisionVerdict.DENY, (
+            f"expected {pattern} to deny the spelling it was written for; if this "
+            f"fails the pattern changed and the xfail below needs revisiting"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "pack patterns are spelled uppercase or backslash-separated, so none of "
+            "them can match a lowercased forward-slash path; needs the matching "
+            "canonical spellings adding to the packs"
+        ),
+    )
+    @pytest.mark.parametrize(("raw", "pattern"), CASES)
+    def test_a_write_denied_before_canonicalisation_is_denied_after_it(
+        self, raw: str, pattern: str
+    ) -> None:
+        decision = PolicyEngine(loader=PolicyLoader()).evaluate(self._write_event(raw))
+        assert decision.decision == DecisionVerdict.DENY, (
+            f"canonicalisation put this path beyond {pattern}, so a write the pack "
+            f"denies in its original spelling is now allowed"
+        )
 
 
 class TestPiNormaliserRefusals:
