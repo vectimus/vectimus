@@ -256,6 +256,80 @@ class TestPiRelativePaths:
         assert event.action.file_path == "/proj/out.txt"
 
 
+class TestPiWindowsPathsReachACedarDeny:
+    """Windows-shaped credential reads must land on a real Cedar DENY.
+
+    A string-shape assertion alone proves nothing about enforcement: a
+    canonicalisation that silently regressed -- backslashes left in, case
+    left folded the wrong way -- could still satisfy it while the path sailed
+    past every rule.  So these normalise the event and run it through the
+    engine, and assert the SSH-key rule is what blocks it.
+    """
+
+    RULE = "vectimus-secrets-002"
+
+    @pytest.mark.parametrize(
+        ("raw", "cwd"),
+        [
+            # A plain drive-letter path: the baseline the others are variants of.
+            (r"C:\Users\dev\.ssh\id_rsa", r"C:\Users\dev\proj"),
+            # `.SSH`: Windows is case-insensitive, and the rule is lowercase, so
+            # the fold is the only thing making this match.
+            (r"C:\Users\dev\.SSH\id_rsa", r"C:\Users\dev\proj"),
+            # A mixed-separator UNC path -- absolute to posixpath, so a
+            # POSIX-first return would have handed it on with backslashes still
+            # in it, matching nothing.
+            ("//server\\share\\.ssh\\id_rsa", r"C:\proj"),
+            # A clean UNC path.
+            ("\\\\server\\share\\.ssh\\id_rsa", r"C:\proj"),
+        ],
+    )
+    def test_a_windows_ssh_key_read_is_denied(self, raw: str, cwd: str) -> None:
+        event = normalise(_payload("read", {"path": raw}, cwd=cwd), "pi")
+        decision = PolicyEngine(loader=PolicyLoader()).evaluate(event)
+        assert decision.decision == DecisionVerdict.DENY
+        assert self.RULE in decision.matched_policy_ids
+
+    def test_the_deny_comes_from_the_ssh_rule_and_not_a_blanket_one(self) -> None:
+        """Anti-vacuity: disable the SSH-key rule and the read must be allowed.
+
+        Without this, the denies above would keep passing if `vectimus-secrets-002`
+        were deleted and some unrelated catch-all happened to block instead --
+        they would say nothing about whether the canonicalisation actually made
+        the path reach that rule.
+        """
+        event = normalise(
+            _payload("read", {"path": r"C:\Users\dev\.SSH\id_rsa"}, cwd=r"C:\Users\dev\proj"),
+            "pi",
+        )
+        engine = PolicyEngine(loader=PolicyLoader(extra_disabled_rules={self.RULE}))
+        assert engine.evaluate(event).decision == DecisionVerdict.ALLOW, (
+            f"with {self.RULE} disabled the Windows SSH-key read must be allowed, "
+            "otherwise the denies above prove nothing about that rule"
+        )
+
+    @pytest.mark.parametrize(
+        ("raw", "why"),
+        [
+            (r"C:\Users\dev\.ssh.\id_rsa", "trailing dot Windows strips"),
+            (r"C:\Users\dev\.ssh \id_rsa", "trailing space Windows strips"),
+            (r"\\.\C:\Users\dev\.ssh\id_rsa", "device namespace"),
+            (r"\\?\C:\Users\dev\.ssh\id_rsa", "extended-length device namespace"),
+            (r"\Users\dev\.ssh\id_rsa", "root-relative, drive dropped"),
+            (r"C:\PROGRA~1\.ssh\id_rsa", "8.3 short-name alias"),
+        ],
+    )
+    def test_an_uncanonicalisable_windows_shape_is_refused(self, raw: str, why: str) -> None:
+        """Fail closed on a shape that cannot be reduced to one matchable path.
+
+        Each of these would otherwise reach Cedar as a path matching none of
+        the SSH rules it should -- a fail-open.  The adapter refuses instead,
+        and the hook turns that refusal into a deny.
+        """
+        with pytest.raises(PiNormalisationError):
+            normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
+
+
 class TestPiNormaliserRefusals:
     """Everything the adapter refuses to guess at."""
 
