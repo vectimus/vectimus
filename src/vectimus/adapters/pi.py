@@ -149,6 +149,24 @@ def _edit_content(tool_input: dict[str, Any]) -> str:
     return "\n".join(texts)
 
 
+def _canonical_windows_path(raw: str) -> str:
+    """Return a Windows or UNC path in the form policy patterns are written in.
+
+    The separators are the problem.  A rule guarding ``*/.ssh/*`` matches
+    nothing in ``C:\\Users\\dev\\.ssh\\id_rsa``, so a Windows session judged by
+    a POSIX evaluation server would pass every path rule it should have
+    failed -- recognising the path as absolute and then handing it on
+    untouched is a fail-open of its own.
+
+    Traversal is collapsed with ``ntpath`` first, because ``posixpath`` cannot
+    see ``..\\`` as traversal at all and the shared ``_extract_file_path``
+    would leave it in place.  Folding the separators afterwards gives one
+    spelling both platforms can match.  A UNC path keeps its two leading
+    slashes, which ``posixpath.normpath`` preserves.
+    """
+    return ntpath.normpath(raw).replace("\\", "/")
+
+
 def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
     """Return *raw* as an absolute path, resolving it against *cwd*.
 
@@ -166,11 +184,18 @@ def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
     payload from a Windows session is read the same way on a Linux evaluation
     server and vice versa.  Judging ``C:\\Users\\dev\\.ssh\\id_rsa`` by POSIX
     rules alone would call it relative and join it onto the cwd, producing a
-    path that matches no rule at all -- a fail-open.  The shared
-    ``_extract_file_path`` still does the traversal collapsing afterwards.
+    path that matches no rule at all -- a fail-open.  A Windows path is then
+    rewritten by ``_canonical_windows_path``, since keeping its backslashes
+    would match no rule either.  The shared ``_extract_file_path`` still does
+    the POSIX traversal collapsing afterwards.
     """
-    if posixpath.isabs(raw) or ntpath.isabs(raw):
+    # POSIX first: `ntpath.isabs` accepts a leading `/` too, so only a path
+    # that ntpath alone calls absolute -- a drive letter, or a UNC share -- is
+    # a Windows one, and only those want rewriting.
+    if posixpath.isabs(raw):
         return raw
+    if ntpath.isabs(raw):
+        return _canonical_windows_path(raw)
     if cwd is None:
         raise PiNormalisationError(
             f"Pi tool '{tool_name}' sent the relative path '{raw}' with no 'cwd' to "
@@ -178,9 +203,11 @@ def _absolute_path(raw: str, cwd: str | None, tool_name: str) -> str:
             f"See {DOC_URL}"
         )
     # Join with the flavour the working directory is written in, so a Windows
-    # cwd keeps its separators instead of gaining a POSIX one.
-    flavour = ntpath if ntpath.isabs(cwd) and not posixpath.isabs(cwd) else posixpath
-    return flavour.join(cwd, raw)
+    # cwd keeps its own shape instead of gaining a POSIX separator, and then
+    # goes through the same rewrite as an absolute Windows path.
+    if ntpath.isabs(cwd) and not posixpath.isabs(cwd):
+        return _canonical_windows_path(ntpath.join(cwd, raw))
+    return posixpath.join(cwd, raw)
 
 
 @register("pi")

@@ -218,21 +218,38 @@ class TestPiRelativePaths:
             normalise(payload, "pi")
 
     @pytest.mark.parametrize(
-        "raw",
-        [r"C:\Users\dev\.ssh\id_rsa", r"\\server\share\secrets.txt"],
+        ("raw", "expected"),
+        [
+            (r"C:\Users\dev\.ssh\id_rsa", "C:/Users/dev/.ssh/id_rsa"),
+            (r"\\server\share\secrets.txt", "//server/share/secrets.txt"),
+        ],
     )
-    def test_a_windows_path_is_recognised_as_absolute(self, raw: str) -> None:
-        """Judging it by POSIX rules alone would fail open.
+    def test_a_windows_path_is_canonicalised_not_merely_recognised(
+        self, raw: str, expected: str
+    ) -> None:
+        """Recognising it as absolute is only half of it.
 
-        `posixpath.isabs(r"C:\\...")` is False, so the path would be joined
-        onto the cwd instead, producing something that matches no rule at all.
+        `posixpath.isabs(r"C:\\...")` is False, so left to POSIX rules the
+        path would be joined onto the cwd.  But passing the backslashes
+        straight through fails open just as surely: a rule guarding
+        `*/.ssh/*` matches none of them, so a Windows session judged by a
+        POSIX evaluator would come back ALLOW.
         """
         event = normalise(_payload("read", {"path": raw}, cwd=r"C:\proj"), "pi")
-        assert event.action.file_path == raw
+        assert event.action.file_path == expected
 
-    def test_a_windows_relative_path_joins_with_windows_separators(self) -> None:
+    def test_windows_traversal_is_collapsed_before_the_separators_go(self) -> None:
+        """`posixpath` cannot see `..\\` as traversal, so `ntpath` does it here."""
+        event = normalise(
+            _payload("read", {"path": r"C:\proj\..\Users\dev\.ssh\id_rsa"}, cwd=r"C:\proj"),
+            "pi",
+        )
+        assert event.action.file_path == "C:/Users/dev/.ssh/id_rsa"
+
+    def test_a_windows_relative_path_joins_with_the_windows_cwd(self) -> None:
+        """Joined the Windows way, then canonicalised like any Windows path."""
         event = normalise(_payload("read", {"path": r"sub\notes.txt"}, cwd=r"C:\proj"), "pi")
-        assert event.action.file_path == r"C:\proj\sub\notes.txt"
+        assert event.action.file_path == "C:/proj/sub/notes.txt"
 
     def test_a_bash_redirect_to_a_relative_path_is_resolved_too(self) -> None:
         event = normalise(_payload("bash", {"command": "echo x > out.txt"}, cwd="/proj"), "pi")

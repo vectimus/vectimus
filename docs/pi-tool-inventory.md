@@ -161,7 +161,19 @@ The adapter closes that by resolving every relative path against the
 payload's `cwd` before normalisation.  Both POSIX and Windows path
 flavours count as absolute regardless of the host platform: judging
 `C:\Users\dev\.ssh\id_rsa` by POSIX rules alone would call it relative
-and join it onto the cwd, yielding a path that matches no rule at all.  A relative path with **no** `cwd`
+and join it onto the cwd, yielding a path that matches no rule at all.
+
+Recognising a Windows path is only half of it, so the adapter also
+rewrites one into a single canonical spelling: traversal collapsed with
+`ntpath`, then backslashes folded to forward slashes.
+`C:\Users\dev\.ssh\id_rsa` becomes `C:/Users/dev/.ssh/id_rsa`, and
+`\\server\share\secrets.txt` becomes `//server/share/secrets.txt`.
+Without that, a Windows session judged by a POSIX evaluation server would
+pass every path rule it should have failed -- `like "*.ssh/*"` matches
+nothing written with backslashes -- and `posixpath` cannot see `..\` as
+traversal either.
+
+A relative path with **no** `cwd`
 in the payload is denied: without the working directory the path cannot
 be made comparable to the paths policies are written against, and
 evaluating it anyway would report a pass it did not earn.  The extension
