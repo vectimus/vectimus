@@ -236,3 +236,46 @@ forbid (
     context.file_path like "*.claude/memory*" ||
     context.file_path like "*.cursor/memory*"
 };
+
+// ---------------------------------------------------------------------------
+// AI coding assistant application-data config directories
+// ---------------------------------------------------------------------------
+
+// vectimus-fileint-013
+// VTMS-2026-0001 | OWASP: ASI04 | SOC2-CC6.1 | NIST-AI-GV-6.2 | EU-AI-14
+// @controls OWASP-ASI04, SOC2-CC6.1, NIST-AI-GV-6.2, EU-AI-14, ISO27001-A.8.9
+// SANDWORM_MODE Stage 2: rogue npm packages (claud-code, cloude-code, opencraw)
+// wrote a hidden MCP server into ~/.config/claude/claude_desktop_config.json,
+// ~/.config/cursor/, and ~/.config/windsurf/ after a 48-96 h delay, then
+// embedded prompt-injection payloads instructing the agent to silently forward
+// ~/.ssh/id_rsa and ~/.aws/credentials to the rogue server's tools.
+// vectimus-fileint-008 covers */mcp.json and *mcp_config* patterns; this rule
+// covers the broader XDG config directories for AI assistants targeted here.
+@id("vectimus-fileint-013")
+@description("Block writes to AI coding assistant application-data config directories (SANDWORM_MODE Stage 2 MCP injection vector)")
+@incident("VTMS-2026-0001: SANDWORM_MODE npm worm injected rogue MCP servers into Claude Code, Cursor, and Windsurf configs via ~/.config/<tool>/ directories, February 2026")
+@controls("OWASP-ASI04, SOC2-CC6.1, NIST-AI-GV-6.2, EU-AI-14, ISO27001-A.8.9")
+@suggested_alternative("AI assistant config directories must be modified by a human using the tool's official settings UI or CLI.  To register an approved MCP server use: vectimus mcp allow <server-name>")
+forbid (
+    principal,
+    action == Vectimus::Action::"file_write",
+    resource
+) when {
+    // macOS / Linux XDG config directories for AI coding assistants
+    context.file_path like "*/.config/claude/*" ||
+    context.file_path like "*/.config/cursor/*" ||
+    context.file_path like "*/.config/windsurf/*" ||
+    context.file_path like "*/.config/continue/*" ||
+    // Windows AppData equivalents
+    context.file_path like "*\\AppData\\Roaming\\Claude\\*" ||
+    context.file_path like "*\\AppData\\Roaming\\Cursor\\*" ||
+    context.file_path like "*\\AppData\\Roaming\\Windsurf\\*" ||
+    // Canonicalised Windows form: the Pi adapter lowercases and forward-slashes
+    // Windows paths for a POSIX evaluator, so these AppData dirs arrive lowercased.
+    context.file_path like "*/appdata/roaming/claude/*" ||
+    context.file_path like "*/appdata/roaming/cursor/*" ||
+    context.file_path like "*/appdata/roaming/windsurf/*"
+};
+// Override: AI assistant config directories are human-administered.
+// Do not grant agents write access to these directories.
+// MCP server registration requires: vectimus mcp allow <server-name>

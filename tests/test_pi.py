@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -370,6 +371,14 @@ class TestPackPatternsMatchCanonicalisedWindowsPaths:
 
     `.ssh` (TestPiWindowsPathsReachACedarDeny) is already lowercase/forward-slash
     and survives the fold untouched; these are the families that did not.
+
+    Accepted fail-closed breadth: Cedar `like` `*` matches `/` too, so a companion
+    is as broad as the pattern it mirrors.  `*cargo.lock` also denies a genuinely
+    lowercase POSIX `/srv/cargo.lock`, and `*/windows/system32/*` denies
+    `/srv/windows/system32/...`; likewise `*claude.md`/`*agents.md`/`*dockerfile*`
+    catch lowercase POSIX names.  Every companion is deny-only (inside a `forbid`),
+    so the worst case is a legitimate lowercase write failing closed -- a blocked
+    write that suggests a PR -- never a false allow.  This is accepted.
     """
 
     # (Windows path, cwd, the rule whose companion must catch the canonical form).
@@ -383,6 +392,11 @@ class TestPackPatternsMatchCanonicalisedWindowsPaths:
         (r"C:\Windows\System32\drv.sys", r"C:\proj", "vectimus-fileint-009"),
         (r"C:\Windows\SysWOW64\x.dll", r"C:\proj", "vectimus-fileint-009"),
         (r"C:\prod\Dockerfile", r"C:\proj", "vectimus-fileint-002"),
+        # SANDWORM_MODE AppData MCP-injection vector (fileint-013) -- the HIGH a
+        # canonicalised Pi write reached with no companion until this fold.
+        (r"C:\Users\dev\AppData\Roaming\Claude\config.json", r"C:\proj", "vectimus-fileint-013"),
+        (r"C:\Users\dev\AppData\Roaming\Cursor\config.json", r"C:\proj", "vectimus-fileint-013"),
+        (r"C:\Users\dev\AppData\Roaming\Windsurf\config.json", r"C:\proj", "vectimus-fileint-013"),
     ]
 
     # The native (un-canonicalised) spelling each companion sits beside.  POSIX
@@ -399,6 +413,9 @@ class TestPackPatternsMatchCanonicalisedWindowsPaths:
         (r"C:\Windows\System32\drv.sys", "vectimus-fileint-009"),
         (r"C:\Windows\SysWOW64\x.dll", "vectimus-fileint-009"),
         ("/proj/prod/Dockerfile", "vectimus-fileint-002"),
+        (r"C:\Users\dev\AppData\Roaming\Claude\config.json", "vectimus-fileint-013"),
+        (r"C:\Users\dev\AppData\Roaming\Cursor\config.json", "vectimus-fileint-013"),
+        (r"C:\Users\dev\AppData\Roaming\Windsurf\config.json", "vectimus-fileint-013"),
     ]
 
     @staticmethod
@@ -450,7 +467,6 @@ class TestPackPatternsMatchCanonicalisedWindowsPaths:
         )
 
 
-# A pack rule's `@id`, then every `context.file_path like "..."` glob in its body.
 _RULE_ID_RE = re.compile(r'@id\("([^"]+)"\)')
 _FILE_PATH_LIKE_RE = re.compile(r'context\.file_path\s+like\s+"((?:\\.|[^"\\])*)"')
 
@@ -465,33 +481,126 @@ def _cedar_unescape(glob: str) -> str:
     return glob.replace("\\\\", "\\")
 
 
-def _file_path_globs_by_rule() -> list[tuple[str, str, list[str]]]:
-    """Every (pack file, rule id, [file_path globs]) across the vendored packs."""
-    out: list[tuple[str, str, list[str]]] = []
-    for cedar in sorted(_BUNDLED_POLICIES.glob("*/*.cedar")):
-        text = cedar.read_text()
+def _strip_cedar_comments(text: str) -> str:
+    """Drop ``//`` line comments, leaving ``//`` inside string literals intact.
+
+    The guard must not count a companion that appears only in a comment -- that
+    text denies nothing -- so comments are removed before any glob is collected.
+    """
+    out: list[str] = []
+    for line in text.splitlines():
+        in_str = False
+        kept: list[str] = []
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == '"':
+                in_str = not in_str
+            elif ch == "/" and not in_str and i + 1 < len(line) and line[i + 1] == "/":
+                break
+            kept.append(ch)
+            i += 1
+        out.append("".join(kept))
+    return "\n".join(out)
+
+
+def _extract_braced_block(text: str, keyword: str) -> str:
+    """Return the content between the braces of ``keyword { ... }``, or ``""``."""
+    m = re.search(rf"\b{keyword}\s*\{{", text)
+    if not m:
+        return ""
+    start = text.index("{", m.start())
+    depth = 0
+    for j in range(start, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : j]
+    return text[start + 1 :]
+
+
+def _denying_file_path_globs(rule_body: str) -> set[str]:
+    """The file_path globs a rule *positively denies* on.
+
+    Structural, not lexical: only a ``forbid`` rule denies, only its ``when``
+    condition is positive (an ``unless`` clause negates the deny), and a glob
+    negated with ``!`` does not deny.  ``rule_body`` must already be
+    comment-stripped.  A companion that lives only in a comment, an ``unless``
+    block, a ``permit`` rule, or behind a ``!`` is therefore not counted -- which
+    is exactly what stops the guard being satisfied by a companion that protects
+    nothing.
+    """
+    if not re.search(r"\bforbid\b", rule_body):
+        return set()
+    when_block = _extract_braced_block(rule_body, "when")
+    globs: set[str] = set()
+    for m in _FILE_PATH_LIKE_RE.finditer(when_block):
+        prefix = when_block[: m.start()].rstrip()
+        while prefix.endswith("("):
+            prefix = prefix[:-1].rstrip()
+        if prefix.endswith("!"):
+            continue  # negated: does not contribute a deny
+        globs.add(_cedar_unescape(m.group(1)))
+    return globs
+
+
+def _denying_globs_by_rule(policy_dir: Path) -> list[tuple[str, str, set[str]]]:
+    """Every (pack file, rule id, positively-denied file_path globs) in a corpus."""
+    out: list[tuple[str, str, set[str]]] = []
+    for cedar in sorted(policy_dir.glob("*/*.cedar")):
+        text = _strip_cedar_comments(cedar.read_text())
         ids = list(_RULE_ID_RE.finditer(text))
         for i, m in enumerate(ids):
             end = ids[i + 1].start() if i + 1 < len(ids) else len(text)
-            body = text[m.end() : end]
-            globs = [_cedar_unescape(g) for g in _FILE_PATH_LIKE_RE.findall(body)]
+            globs = _denying_file_path_globs(text[m.end() : end])
             if globs:
                 out.append((cedar.name, m.group(1), globs))
     return out
 
 
+def _upstream_policies_dir() -> Path | None:
+    """The source-of-truth policies repo, when checked out beside this one.
+
+    The guard runs against it too so a companion missing upstream (which feeds
+    the live API) is caught, not just the vendored copy.  Resolved from
+    ``VECTIMUS_UPSTREAM_POLICIES`` or the sibling ``../policies`` checkout;
+    ``None`` when absent (e.g. CI), where that corpus is simply not scanned.
+    """
+    env = os.environ.get("VECTIMUS_UPSTREAM_POLICIES")
+    if env:
+        p = Path(env)
+        return p if p.is_dir() else None
+    sibling = _BUNDLED_POLICIES.parent.parent / "policies"
+    return sibling if sibling.is_dir() and sibling != _BUNDLED_POLICIES else None
+
+
+def _guarded_corpora() -> list[tuple[str, Path]]:
+    corpora = [("vendored", _BUNDLED_POLICIES)]
+    upstream = _upstream_policies_dir()
+    if upstream is not None:
+        corpora.append(("upstream", upstream))
+    return corpora
+
+
 class TestEveryWindowsTargetingPatternHasACompanion:
     """Completeness guard for fold-both-sides: a Windows-targeting path pattern
     that lacks its canonical companion would silently fail open once the Pi
-    adapter canonicalises, so this proves none is missing.
+    adapter canonicalises, so this proves none is missing -- in BOTH the vendored
+    packs and the upstream source-of-truth (when checked out beside this repo).
 
     The Pi adapter folds Windows paths to lowercase + forward-slash.  A
     `context.file_path` glob only needs a companion when it is *not* already in
     that form -- i.e. it carries an uppercase letter or a backslash.  For every
     such glob the canonical companion ``glob.replace("\\\\", "/").lower()`` must
-    appear as a `file_path` glob in the SAME rule.  Add a Windows-only pattern
-    without its companion and this fails -- the safety net that keeps the fold
-    complete as the packs grow.
+    appear as a glob the SAME rule *positively denies on*.  Add a Windows-only
+    pattern without its companion and this fails -- the safety net that keeps the
+    fold complete as the packs grow.
+
+    "Positively denies on" is structural, not lexical (see
+    :func:`_denying_file_path_globs`): a companion in a comment, an ``unless``
+    clause, a ``permit`` rule, or behind ``!`` denies nothing and does not count.
 
     Two families are exempt: a canonicalised Pi path can never reach them, so a
     companion would be dead code (and this guard must not demand one).
@@ -511,45 +620,68 @@ class TestEveryWindowsTargetingPatternHasACompanion:
         ("vectimus-infra-007", r"C:\Users\*\..\*"),
     }
 
-    def test_no_windows_targeting_file_path_pattern_lacks_a_companion(self) -> None:
+    @pytest.mark.parametrize(("corpus", "policy_dir"), _guarded_corpora())
+    def test_no_windows_targeting_file_path_pattern_lacks_a_companion(
+        self, corpus: str, policy_dir: Path
+    ) -> None:
         missing: list[str] = []
-        for pack, rule_id, globs in _file_path_globs_by_rule():
-            present = set(globs)
-            for glob in globs:
+        for pack, rule_id, deny_globs in _denying_globs_by_rule(policy_dir):
+            for glob in deny_globs:
                 canonical = glob.replace("\\", "/").lower()
                 if canonical == glob:
                     continue  # already lowercase/forward-slash: survives the fold
                 if (rule_id, glob) in self.EXEMPT:
                     continue
-                if canonical not in present:
-                    missing.append(f"{pack} {rule_id}: {glob!r} -> needs {canonical!r}")
+                if canonical not in deny_globs:
+                    missing.append(f"[{corpus}] {pack} {rule_id}: {glob!r} -> needs {canonical!r}")
         assert not missing, (
             "these file_path patterns target a Windows spelling but have no "
-            "lowercase/forward-slash companion in the same rule, so a canonicalised "
-            "Pi write would fail open -- add the companion (or, if a canonicalised "
-            "path can never reach the rule, an EXEMPT entry with the reason):\n  "
-            + "\n  ".join(missing)
+            "lowercase/forward-slash companion the same rule denies on, so a "
+            "canonicalised Pi write would fail open -- add the companion (or, if a "
+            "canonicalised path can never reach the rule, an EXEMPT entry with the "
+            "reason):\n  " + "\n  ".join(missing)
         )
 
-    def test_the_guard_would_fire_without_the_companions(self) -> None:
-        """Anti-vacuity for the guard itself: the check is only meaningful if it
-        would flag a Windows-targeting glob whose companion is absent.  Simulate
-        one and confirm the same logic reports it."""
-        globs = ["*CLAUDE.md"]  # no "*claude.md" beside it
-        present = set(globs)
-        flagged = [
-            g
-            for g in globs
-            if g.replace("\\", "/").lower() != g and g.replace("\\", "/").lower() not in present
-        ]
-        assert flagged == ["*CLAUDE.md"]
+    def test_the_collector_ignores_comment_only_and_unless_only_companions(self) -> None:
+        """The guard is only sound if a companion that denies nothing is rejected.
+
+        Exercises the real collector on a forbid rule whose companion sits (a) in
+        the ``when`` condition, (b) only in a comment, (c) only in an ``unless``.
+        Only (a) must be counted; (b) and (c) must not, so the guard would still
+        flag the native pattern as uncompanioned.
+        """
+
+        def collect(body: str) -> set[str]:
+            return _denying_file_path_globs(_strip_cedar_comments(body))
+
+        when = (
+            "forbid (principal, action, resource) when {\n"
+            '  context.file_path like "*CLAUDE.md" ||\n'
+            '  context.file_path like "*claude.md"\n};'
+        )
+        comment = (
+            "forbid (principal, action, resource) when {\n"
+            '  context.file_path like "*CLAUDE.md"\n'
+            '  // context.file_path like "*claude.md"\n};'
+        )
+        unless = (
+            "forbid (principal, action, resource) when {\n"
+            '  context.file_path like "*CLAUDE.md"\n} unless {\n'
+            '  context.file_path like "*claude.md"\n};'
+        )
+
+        assert "*claude.md" in collect(when)
+        assert "*claude.md" not in collect(comment)
+        assert "*claude.md" not in collect(unless)
 
     def test_every_exempt_entry_still_exists_in_the_packs(self) -> None:
-        """Keep EXEMPT honest: an exemption for a glob no longer in the packs is
-        stale and would hide a future re-introduction, so each must still match a
-        real rule/glob pair."""
+        """Keep EXEMPT honest: an exemption for a glob no longer denied on is stale
+        and would hide a future re-introduction, so each must still match a real
+        rule/glob the vendored packs deny on."""
         real = {
-            (rule_id, glob) for _, rule_id, globs in _file_path_globs_by_rule() for glob in globs
+            (rule_id, glob)
+            for _, rule_id, globs in _denying_globs_by_rule(_BUNDLED_POLICIES)
+            for glob in globs
         }
         stale = self.EXEMPT - real
         assert not stale, f"EXEMPT entries no longer present in the packs: {stale}"
