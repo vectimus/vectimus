@@ -195,6 +195,23 @@ def _emit_deny(source: str, payload: dict, reason: str, *, escalate: bool = Fals
     sys.exit(0)
 
 
+def _hook_output_denies(hook_output: object) -> bool:
+    """True only when a server-supplied hook payload actually denies.
+
+    Server mode trusts the server's VERDICT, but a payload whose inner
+    permissionDecision contradicts the top-level deny/escalate must not be
+    relayed to the agent -- a buggy or compromised server could otherwise
+    smuggle an allow inside a deny.  When this returns False the caller
+    constructs the deny payload locally instead (fail closed).
+    """
+    if not isinstance(hook_output, dict):
+        return False
+    inner = hook_output.get("hookSpecificOutput", hook_output)
+    if not isinstance(inner, dict):
+        return False
+    return inner.get("permissionDecision") in ("deny", "ask")
+
+
 def _project_path_from_payload(source: str, payload: dict) -> Path:
     """Resolve the project root for *payload*.
 
@@ -294,7 +311,11 @@ def hook_cmd(source: str) -> None:
             decision_val = result.get("decision")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
                 hook_output = result.get("hookSpecificOutput")
-                if hook_output is None or source not in _HOOK_WRAPPER_SOURCES:
+                if (
+                    hook_output is None
+                    or source not in _HOOK_WRAPPER_SOURCES
+                    or not _hook_output_denies(hook_output)
+                ):
                     reason = result.get("reason", "Denied by Vectimus")
                     if decision_val == DecisionVerdict.ESCALATE:
                         _emit_deny(source, payload, reason, escalate=True)
