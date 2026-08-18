@@ -23,11 +23,13 @@ the model as the tool's error result.  Throwing blocks too -- Pi does not
 catch `tool_call` handler errors, and documents that as fail-safe.
 
 The extension allows a call only when `vectimus hook` exits 0 with nothing on
-stdout, and blocks in every other case:
+stdout **and** writes its allow acknowledgement (on fd 3), and blocks in every
+other case:
 
 | What happened | Result |
 |---------------|--------|
-| Exit 0, empty stdout | **Allowed** |
+| Exit 0, empty stdout, allow acknowledged | **Allowed** |
+| Exit 0, empty stdout, no acknowledgement | Blocked |
 | Deny payload on stdout | Blocked, with the policy's reason |
 | Output that is not JSON | Blocked |
 | Output that parses but is not a deny | Blocked |
@@ -37,7 +39,10 @@ stdout, and blocks in every other case:
 | No answer within 30 seconds | Child killed, blocked |
 
 Empty stdout on its own is not an allow.  A hook that crashed prints exactly
-what an allow prints, so the exit code has to agree.
+what an allow prints, so the exit code has to agree -- and so must the
+acknowledgement.  A replaced or broken `vectimus` -- `/usr/bin/true`, a shim
+that never reads the call -- exits 0 silently too; only the real allow path
+emits the acknowledgement, so without it the call is blocked.
 
 Override the deadline with `VECTIMUS_PLUGIN_TIMEOUT_MS` if 30 seconds is
 wrong for your setup.  Lowering it makes Vectimus block sooner under load,

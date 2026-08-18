@@ -65,7 +65,7 @@ try {
 # Stub `vectimus` implementations, one per outcome the plugin must handle.
 # Each drains stdin first, the way the real hook does.
 _STUBS = {
-    "allow": "cat >/dev/null\nexit 0\n",
+    "allow": "cat >/dev/null\nprintf 'VECTIMUS-ALLOW\\n' >&3\nexit 0\n",
     "deny": (
         "cat >/dev/null\n"
         'echo \'{"decision":"deny","reason":"Blocked by policy vectimus-destruct-001"}\'\n'

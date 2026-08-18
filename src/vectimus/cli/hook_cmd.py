@@ -49,6 +49,52 @@ _SIMPLE_DENY_SOURCES = ("gemini-cli", "opencode", "pi")
 # cannot be trusted, so it denies rather than falling through.
 _UNRECOGNISED_VERDICT_REASON = "Vectimus: unrecognised policy verdict (fail closed)"
 
+# OpenCode and Pi have no native allow signal, so their plugin/extension reads
+# an allow as "exit 0 with empty stdout".  That alone cannot tell a real allow
+# from a `vectimus` that never ran: a shim that exits 0 without reading stdin
+# looks byte-for-byte identical.  So on these two sources every allow emits an
+# explicit acknowledgement the template verifies before permitting the call --
+# a child that exits 0 without reaching this allow path produces no ack and is
+# blocked.  Other sources (Claude Code, Cursor, ...) keep the empty-stdout
+# contract and never see this.
+_ALLOW_ACK_SOURCES = ("opencode", "pi")
+_ALLOW_ACK = b"VECTIMUS-ALLOW\n"
+
+
+def _emit_allow(source: str) -> None:
+    """Acknowledge an allow for the sources that require it, then exit 0.
+
+    The ack goes to the file descriptor named in ``VECTIMUS_ALLOW_ACK_FD`` --
+    the template opens fd 3 and points here at it -- so stdout stays clean for
+    the deny path's JSON.  When no such fd is wired up (a manual run, not the
+    template) the sentinel falls back to stdout, which the template still reads
+    as a non-empty, non-allow response and blocks on; either way a broken or
+    replaced binary cannot fall open.
+    """
+    if source in _ALLOW_ACK_SOURCES:
+        _write_allow_ack()
+    sys.exit(0)
+
+
+def _write_allow_ack() -> None:
+    """Write the allow sentinel to the ack fd, or to stdout if there is none."""
+    fd_raw = os.environ.get("VECTIMUS_ALLOW_ACK_FD")
+    if fd_raw:
+        try:
+            fd = int(fd_raw)
+        except (TypeError, ValueError):
+            fd = None
+        if fd is not None:
+            try:
+                os.write(fd, _ALLOW_ACK)
+                return
+            except OSError:
+                # The named fd is not open here after all; fall through to the
+                # stdout fallback rather than let an allow pass unacknowledged.
+                pass
+    sys.stdout.write(_ALLOW_ACK.decode())
+    sys.stdout.flush()
+
 
 def _log_stderr(msg: str) -> None:
     """Write diagnostic message to stderr (not visible to agent)."""
@@ -265,7 +311,7 @@ def hook_cmd(source: str) -> None:
     if not raw.strip():
         if debug:
             _log_stderr("empty stdin, allowing")
-        sys.exit(0)
+        _emit_allow(source)
 
     try:
         payload = json.loads(raw)
@@ -279,7 +325,7 @@ def hook_cmd(source: str) -> None:
     if source == "codex" and payload.get("hook_event_name") != "PreToolUse":
         if debug:
             _log_stderr("codex hook outside PreToolUse, allowing without evaluation")
-        sys.exit(0)
+        _emit_allow(source)
 
     project_path = _project_path_from_payload(source, payload)
 
@@ -308,7 +354,7 @@ def hook_cmd(source: str) -> None:
                     escalate=(decision_val == DecisionVerdict.ESCALATE),
                 )
             if decision_val == DecisionVerdict.ALLOW:
-                sys.exit(0)
+                _emit_allow(source)
             # Anything else — missing, misspelled, wrong type, a verdict from a
             # newer server this client does not understand — is not an allow.
             _log_stderr(f"unrecognised server decision {decision_val!r} (fail closed)")
@@ -344,7 +390,7 @@ def hook_cmd(source: str) -> None:
             _emit_deny(source, payload, reason)
 
         if verdict == DecisionVerdict.ALLOW:
-            sys.exit(0)
+            _emit_allow(source)
 
         # Only an explicit allow allows.  A daemon that answers with a missing
         # or unrecognised verdict is not trusted to have evaluated anything.
@@ -468,7 +514,7 @@ def hook_cmd(source: str) -> None:
     except Exception:
         pass
 
-    sys.exit(0)
+    _emit_allow(source)
 
 
 def _generate_receipt_async(

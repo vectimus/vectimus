@@ -85,7 +85,7 @@ try {
 # Stub `vectimus` implementations, one per outcome the extension must handle.
 # Each drains stdin first, the way the real hook does.
 _STUBS = {
-    "allow": "cat >/dev/null\nexit 0\n",
+    "allow": "cat >/dev/null\nprintf 'VECTIMUS-ALLOW\\n' >&3\nexit 0\n",
     "deny": (
         "cat >/dev/null\n"
         'echo \'{"decision":"deny","reason":"Blocked by policy vectimus-destruct-001"}\'\n'
@@ -140,8 +140,8 @@ class _Harness:
         stub.chmod(0o755 if executable else 0o644)
 
     def write_capturing_stub(self) -> None:
-        """A stub that saves stdin and then allows."""
-        self.write_stub(f"cat > {self.captured}\nexit 0\n")
+        """A stub that saves stdin, acknowledges its allow, and then exits."""
+        self.write_stub(f"cat > {self.captured}\nprintf 'VECTIMUS-ALLOW\\n' >&3\nexit 0\n")
 
     def remove_stub(self) -> None:
         (self.bin / "vectimus").unlink(missing_ok=True)

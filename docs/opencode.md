@@ -18,11 +18,13 @@ Support is experimental.  Verified against OpenCode 1.18.18.
 OpenCode plugins have one way to stop a tool call: throw from
 `tool.execute.before`.  There is no deny verdict to return and no way to ask
 the user.  So the plugin allows a call only when `vectimus hook` exits 0 with
-nothing on stdout, and throws in every other case:
+nothing on stdout **and** writes its allow acknowledgement (on fd 3), and
+throws in every other case:
 
 | What happened | Result |
 |---------------|--------|
-| Exit 0, empty stdout | **Allowed** |
+| Exit 0, empty stdout, allow acknowledged | **Allowed** |
+| Exit 0, empty stdout, no acknowledgement | Blocked |
 | Deny payload on stdout | Blocked, with the policy's reason |
 | Output that is not JSON | Blocked |
 | Output that parses but is not a deny | Blocked |
@@ -32,7 +34,10 @@ nothing on stdout, and throws in every other case:
 | No answer within 30 seconds | Child killed, blocked |
 
 Empty stdout on its own is not an allow.  A hook that crashed prints exactly
-what an allow prints, so the exit code has to agree.
+what an allow prints, so the exit code has to agree -- and so must the
+acknowledgement.  A replaced or broken `vectimus` -- `/usr/bin/true`, a shim
+that never reads the call -- exits 0 silently too; only the real allow path
+emits the acknowledgement, so without it the call is blocked.
 
 Override the deadline with `VECTIMUS_PLUGIN_TIMEOUT_MS` if 30 seconds is
 wrong for your setup.  Lowering it makes Vectimus block sooner under load,

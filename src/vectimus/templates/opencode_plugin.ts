@@ -6,13 +6,17 @@
 //
 // Evaluates every OpenCode tool call against Cedar policies by piping it to
 // `vectimus hook --source opencode`.  The call is allowed only when that
-// process takes the whole payload and exits 0 with nothing at all on stdout.
-// Anything else -- a deny payload, output that will not parse, whitespace
-// where a verdict should be, a non-zero exit, a signal, a spawn failure, a
-// missing binary, a child that exits without reading the call, or the
-// deadline expiring -- throws, and OpenCode blocks the tool call.  Throwing
-// is the only way a plugin can block, so every failure mode has to end in a
-// throw for the guard to be worth having.
+// process takes the whole payload, exits 0 with nothing at all on stdout, AND
+// writes the allow acknowledgement to fd 3.  Exit-0-empty-stdout alone is not
+// enough: a shim that never runs Vectimus (`/usr/bin/true`, a wrapper that
+// ignores stdin) exits 0 silently too, so allow demands positive proof that
+// the real allow path ran.  Anything else -- a deny payload, output that will
+// not parse, whitespace where a verdict should be, a non-zero exit, a signal,
+// a spawn failure, a missing binary, a child that exits without reading the
+// call, a missing acknowledgement, or the deadline expiring -- throws, and
+// OpenCode blocks the tool call.  Throwing is the only way a plugin can block,
+// so every failure mode has to end in a throw for the guard to be worth
+// having.
 //
 // Only OpenCode's exports and node:child_process are used, so this file runs
 // unchanged under both the Bun and Node runtimes.  The `vectimus` binary is
@@ -23,6 +27,12 @@ import { spawn } from "node:child_process"
 const VECTIMUS_BIN = "vectimus"
 const SOURCE = "opencode"
 const DEFAULT_DEADLINE_MS = 30_000
+
+// The exact bytes `vectimus` writes to the ack fd on its allow path, and the
+// fd it writes them to.  Kept off stdout so the deny path's JSON is unchanged;
+// the hook is told the number through this environment variable.
+const ALLOW_ACK = "VECTIMUS-ALLOW\n"
+const ALLOW_ACK_FD = 3
 
 // A hung policy check must not hang the agent forever, and must not fall open
 // when it does.  Overridable so tests do not have to wait 30 seconds.
@@ -60,10 +70,12 @@ function evaluate(payload: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false
     let stdout = ""
+    let ack = ""
     let timer: ReturnType<typeof setTimeout> | undefined
-    // An allow needs both ends to have gone right: the check exited 0 with
-    // nothing to say, *and* it was handed the call it was meant to judge.
-    // Either half alone is what a broken check looks like.
+    // An allow needs every end to have gone right: the check exited 0 with
+    // nothing to say, it was handed the call it was meant to judge, *and* it
+    // acknowledged its own allow path.  Any one of these missing is what a
+    // broken or replaced check looks like.
     let exitedSilently = false
     let stdinSettled = false
     let stdinError: string | undefined
@@ -83,13 +95,22 @@ function evaluate(payload: string): Promise<void> {
         finish(blocked(`policy check did not read the tool call: ${stdinError} (fail closed)`))
         return
       }
+      // The clincher: a silent exit is only an allow if the check also emitted
+      // its allow acknowledgement.  A shim that never ran Vectimus cannot, so
+      // it blocks here even though everything else looked like an allow.
+      if (ack !== ALLOW_ACK) {
+        finish(blocked("policy check did not acknowledge its allow (fail closed)"))
+        return
+      }
       finish()
     }
 
     let child
     try {
       child = spawn(VECTIMUS_BIN, ["hook", "--source", SOURCE], {
-        stdio: ["pipe", "pipe", "pipe"],
+        // A fourth pipe carries the allow acknowledgement, kept off stdout.
+        stdio: ["pipe", "pipe", "pipe", "pipe"],
+        env: { ...process.env, VECTIMUS_ALLOW_ACK_FD: String(ALLOW_ACK_FD) },
       })
     } catch (error) {
       finish(blocked(`could not run \`${VECTIMUS_BIN}\`: ${String(error)}`))
@@ -112,6 +133,17 @@ function evaluate(payload: string): Promise<void> {
     // Drain stderr so a chatty diagnostic cannot fill the pipe and wedge the
     // child.  Its content is for the human, not for the decision.
     child.stderr?.resume()
+
+    // The allow acknowledgement, if any, arrives on the fourth pipe.  It is
+    // read to completion before `close` fires, so `ack` is final by the time
+    // the allow gate consults it.
+    const ackStream = child.stdio[ALLOW_ACK_FD]
+    if (ackStream && "setEncoding" in ackStream) {
+      ackStream.setEncoding("utf8")
+      ackStream.on("data", (chunk: string) => {
+        ack += chunk
+      })
+    }
 
     child.on("error", (error: Error) => {
       const missing = (error as NodeJS.ErrnoException).code === "ENOENT"
