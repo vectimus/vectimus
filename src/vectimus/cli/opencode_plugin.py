@@ -90,6 +90,52 @@ def global_plugin_path() -> Path:
     return opencode_config_dir() / "plugin" / PLUGIN_FILENAME
 
 
+def unloadable_scope_reason(*, project: bool) -> str | None:
+    """Return why OpenCode would never load a plugin installed at this scope.
+
+    A guard OpenCode does not load is worse than no guard: the install
+    reports success, ``vectimus status`` finds the file, and every tool call
+    runs unchecked.  Two environments do that, and neither is visible from
+    the installed file, so they are checked before writing rather than
+    discovered later.
+
+    Returns ``None`` when the scope is fine, otherwise the message to refuse
+    with.  Both are refusals rather than a silent fallback to the other
+    scope: installing somewhere the caller did not ask for is its own kind
+    of surprise, and the fix is one environment variable either way.
+    """
+    if project:
+        if _project_config_disabled():
+            return (
+                "OPENCODE_DISABLE_PROJECT_CONFIG is set, so OpenCode ignores every "
+                "project .opencode directory and would never load a plugin installed "
+                "there -- the install would report success and guard nothing.  Unset "
+                "it, or re-run without --project to install globally."
+            )
+        return None
+
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg and not Path(xdg).is_absolute():
+        return (
+            f"XDG_CONFIG_HOME is the relative path {xdg!r}, so the global plugin "
+            f"directory resolves against whatever the current directory happens to "
+            f"be rather than a fixed location OpenCode looks in.  Set it to an "
+            f"absolute path, or unset it to use ~/.config, and re-run."
+        )
+    return None
+
+
+def _project_config_disabled() -> bool:
+    """Whether OpenCode is set to ignore project ``.opencode`` directories.
+
+    ``ConfigPaths.directories`` tests the variable for JS truthiness, so an
+    empty value does not disable anything but ``0`` or ``false`` do.  Matched
+    here rather than second-guessed: the point is to agree with OpenCode
+    about which directories it reads.
+    """
+    return bool(os.environ.get("OPENCODE_DISABLE_PROJECT_CONFIG"))
+
+
 def project_plugin_path(project_root: Path | None = None) -> Path:
     """Path of the project-level Vectimus plugin."""
     root = project_root if project_root is not None else Path.cwd()

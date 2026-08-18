@@ -169,3 +169,23 @@ Config directories come from `ConfigPaths.directories`
 
 The list is a union, not a fallback chain: a global plugin and a project
 plugin both load and both run.
+
+### Scopes the install refuses
+
+Two environments turn a successful-looking install into no coverage at
+all, and neither shows up in the file that gets written -- `vectimus
+status` finds the plugin, init reports the tool configured, and every
+tool call runs unchecked.  `unloadable_scope_reason` refuses both before
+writing anything:
+
+* `--project` with `OPENCODE_DISABLE_PROJECT_CONFIG` set.  Entry 2 above
+  disappears, so nothing under `.opencode/` is ever read.  The variable is
+  tested for JS truthiness, so an empty value does not disable it, and the
+  refusal matches that rather than second-guessing it.
+* a global install with a relative `XDG_CONFIG_HOME`.  Entry 1 then
+  resolves against whatever the current directory happens to be, so the
+  plugin lands somewhere OpenCode has no reason to look.
+
+Both refuse rather than quietly installing to the other scope: writing a
+security control somewhere the operator did not ask for is its own
+surprise, and either one is a single environment variable to fix.

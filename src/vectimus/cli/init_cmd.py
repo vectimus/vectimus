@@ -556,9 +556,18 @@ def _configure_opencode(*, project: bool = False) -> str:
     redundant but not harmful (the second check sees the same verdict).
 
     Raises :class:`ConfigureRefusedError` when the file on disk is not one
-    Vectimus may overwrite.
+    Vectimus may overwrite, or when the environment means OpenCode would
+    never load the file this would write.
     """
-    from vectimus.cli.opencode_plugin import install_plugin, project_plugin_path
+    from vectimus.cli.opencode_plugin import (
+        install_plugin,
+        project_plugin_path,
+        unloadable_scope_reason,
+    )
+
+    unloadable = unloadable_scope_reason(project=project)
+    if unloadable is not None:
+        raise ConfigureRefusedError(unloadable)
 
     path = project_plugin_path() if project else global_plugin_path()
     result = install_plugin(path)

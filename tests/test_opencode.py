@@ -28,6 +28,7 @@ from vectimus.cli.opencode_plugin import (
     project_plugin_path,
     remove_plugin,
     template_text,
+    unloadable_scope_reason,
 )
 from vectimus.engine.evaluator import PolicyEngine
 from vectimus.engine.loader import PolicyLoader
@@ -530,6 +531,57 @@ class TestPluginInstall:
         assert [p.name for p in path.parent.iterdir()] == ["vectimus.ts"]
 
 
+class TestScopesOpenCodeWouldNotLoad:
+    """Installs that would report success and then guard nothing.
+
+    Both environments are invisible in the installed file: `vectimus status`
+    finds a plugin, the init output says it is configured, and every tool
+    call still runs unchecked.  Refusing up front is the only way the
+    operator finds out.
+    """
+
+    def test_a_project_install_is_refused_when_project_config_is_off(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENCODE_DISABLE_PROJECT_CONFIG", "1")
+        reason = unloadable_scope_reason(project=True)
+        assert reason is not None
+        assert "OPENCODE_DISABLE_PROJECT_CONFIG" in reason
+
+    def test_it_does_not_touch_the_global_scope(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It disables project directories only; the global one still loads."""
+        monkeypatch.setenv("OPENCODE_DISABLE_PROJECT_CONFIG", "1")
+        assert unloadable_scope_reason(project=False) is None
+
+    def test_an_empty_value_disables_nothing(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OpenCode tests it for JS truthiness, where "" is not set."""
+        monkeypatch.setenv("OPENCODE_DISABLE_PROJECT_CONFIG", "")
+        assert unloadable_scope_reason(project=True) is None
+
+    def test_a_global_install_is_refused_under_a_relative_xdg_config_home(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It would resolve against the CWD, which is nowhere OpenCode reads."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", "config")
+        reason = unloadable_scope_reason(project=False)
+        assert reason is not None
+        assert "XDG_CONFIG_HOME" in reason
+
+    def test_a_relative_xdg_config_home_leaves_the_project_scope_alone(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_CONFIG_HOME", "config")
+        assert unloadable_scope_reason(project=True) is None
+
+    def test_an_ordinary_environment_refuses_neither_scope(self, sandbox: Path) -> None:
+        assert unloadable_scope_reason(project=True) is None
+        assert unloadable_scope_reason(project=False) is None
+
+
 class TestPluginRemove:
     def test_removes_a_managed_plugin(self, sandbox: Path) -> None:
         path = global_plugin_path()
@@ -593,6 +645,27 @@ class TestInitAndRemoveCommands:
         path.write_text("export const Mine = async () => ({})\n")
         with pytest.raises(ConfigureRefusedError):
             _configure_opencode()
+
+    def test_configure_refuses_a_project_install_opencode_would_ignore(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """And writes nothing, so status cannot report a guard that is not one."""
+        from vectimus.cli.init_cmd import ConfigureRefusedError, _configure_opencode
+
+        monkeypatch.setenv("OPENCODE_DISABLE_PROJECT_CONFIG", "1")
+        with pytest.raises(ConfigureRefusedError, match="OPENCODE_DISABLE_PROJECT_CONFIG"):
+            _configure_opencode(project=True)
+        assert not project_plugin_path().exists()
+
+    def test_configure_refuses_a_global_install_under_a_relative_xdg_config_home(
+        self, sandbox: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from vectimus.cli.init_cmd import ConfigureRefusedError, _configure_opencode
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", "config")
+        with pytest.raises(ConfigureRefusedError, match="XDG_CONFIG_HOME"):
+            _configure_opencode()
+        assert not (Path.cwd() / "config").exists()
 
     def test_remove_deletes_both_installs(self, sandbox: Path) -> None:
         from vectimus.cli.remove_cmd import remove_cmd
