@@ -3,9 +3,10 @@
 The extension is the whole enforcement point on the Pi side, so reading the
 template is not enough to know it blocks in every failure mode.  These tests
 execute the real shipped file under a JS runtime, drive a stub ``vectimus``
-through each outcome -- allow, deny, garbage, non-zero exit, signal death,
-spawn failure, missing binary, a hang, and a reply that arrives in pieces --
-and also check the payload the extension sends.
+through each outcome -- allow, deny, garbage, whitespace where a verdict
+should be, non-zero exit, signal death, spawn failure, missing binary, a hang,
+a child that exits without reading the call, and a reply that arrives in
+pieces -- and also check the payload the extension sends.
 
 ``test_the_harness_catches_a_neutered_block`` is the guard on the guard: it
 mutates the extension so a deny stops blocking, and fails if the harness
@@ -44,6 +45,8 @@ _BLOCK_ON_DENY = "return { block: true, reason: `Blocked by Vectimus: ${reason}`
 # calls it with one event, and prints the outcome.  The event is overridable so
 # a test can check what the extension makes of a relative path.
 _DRIVER = """
+import { readFileSync } from "node:fs"
+
 const mod = await import("./extension.mts")
 const register = mod.default
 
@@ -59,7 +62,9 @@ if (typeof handler !== "function") {
   process.exit(0)
 }
 
-const event = JSON.parse(process.env.VECTIMUS_TEST_EVENT)
+// From a file rather than the environment: one case needs an input larger
+// than an environment variable may be.
+const event = JSON.parse(readFileSync("./event.json", "utf8"))
 const ctx = {
   cwd: process.env.VECTIMUS_TEST_CWD,
   sessionManager: { getSessionId: () => "ses_test" },
@@ -102,6 +107,10 @@ _STUBS = {
         'printf \'"reason":"arrived in two writes"}\'\n'
         "exit 0\n"
     ),
+    "whitespace": "cat >/dev/null\nprintf ' \\n\\t\\n'\nexit 0\n",
+    # Never reads stdin.  Paired with an oversized input, the extension is
+    # still writing when this exits, so the write ends in EPIPE.
+    "exit_0_without_reading": "sleep 0.2\nexit 0\n",
 }
 
 _DEFAULT_EVENT = {
@@ -152,8 +161,8 @@ class _Harness:
             [str(self.bin), str(Path(_RUNTIME).parent), "/usr/bin", "/bin"]
         )
         env["VECTIMUS_PLUGIN_TIMEOUT_MS"] = str(timeout_ms)
-        env["VECTIMUS_TEST_EVENT"] = json.dumps(event or _DEFAULT_EVENT)
         env["VECTIMUS_TEST_CWD"] = cwd if cwd is not None else str(self.root)
+        (self.root / "event.json").write_text(json.dumps(event or _DEFAULT_EVENT))
         result = subprocess.run(
             [_RUNTIME, "driver.mjs"],
             cwd=self.root,
@@ -223,6 +232,40 @@ def test_exit_one_with_empty_stdout_is_not_an_allow(harness: _Harness) -> None:
     output = harness.run()
     assert output.startswith("BLOCKED:"), output
     assert "fail closed" in output
+
+
+def test_whitespace_on_stdout_is_not_an_allow(harness: _Harness) -> None:
+    """An allow is silence, and a stray newline is not silence.
+
+    Trimming stdout before testing it for emptiness would read a check that
+    printed a blank line -- a broken build, a debug echo, a shell wrapper --
+    as consent it never gave.
+    """
+    harness.write_stub(_STUBS["whitespace"])
+    output = harness.run()
+    assert output.startswith("BLOCKED:"), output
+    assert "only whitespace" in output
+
+
+def test_a_check_that_exits_without_reading_the_call_blocks(harness: _Harness) -> None:
+    """It cannot have judged a call it never received.
+
+    The write is left in flight and ends in EPIPE, while the rest of the
+    outcome -- exit 0, empty stdout -- is byte-for-byte an allow.  Swallowing
+    that error would turn any check that dies early into a pass.  The input is
+    oversized so the write is still going when the child exits; a small one
+    would fit the pipe buffer and complete regardless.
+    """
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    event = {
+        "type": "tool_call",
+        "toolName": "bash",
+        "toolCallId": "call_6",
+        "input": {"command": "echo " + "x" * 512_000},
+    }
+    output = harness.run(event=event)
+    assert output.startswith("BLOCKED:"), output
+    assert "did not read the tool call" in output
 
 
 def test_a_hang_past_the_deadline_blocks(harness: _Harness) -> None:

@@ -4,9 +4,10 @@ The plugin is the whole enforcement point on the OpenCode side: OpenCode
 blocks a tool call only when ``tool.execute.before`` throws.  Reading the
 template is not enough to know it throws in every failure mode, so these
 tests execute the real shipped file under a JS runtime and drive a stub
-``vectimus`` through each outcome -- allow, deny, garbage, non-zero exit,
-signal death, spawn failure, missing binary, a hang, and a reply that
-arrives in pieces.
+``vectimus`` through each outcome -- allow, deny, garbage, whitespace where a
+verdict should be, non-zero exit, signal death, spawn failure, missing binary,
+a hang, a child that exits without reading the call, and a reply that arrives
+in pieces.
 
 ``test_the_harness_catches_a_neutered_throw`` is the guard on the guard: it
 mutates the plugin so a deny stops throwing, and fails if the harness still
@@ -16,6 +17,7 @@ reports a block.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -41,13 +43,18 @@ pytestmark = pytest.mark.skipif(
 _THROW_ON_DENY = "finish(blocked(reasonFrom(trimmed)))"
 
 _DRIVER = """
+import { readFileSync } from "node:fs"
+
 const mod = await import("./plugin.mts")
 const plugin = Object.values(mod)[0]
 const hooks = await plugin({ directory: process.cwd(), worktree: process.cwd() })
+// From a file rather than the environment: one case needs arguments larger
+// than an environment variable may be.
+const args = JSON.parse(readFileSync("./args.json", "utf8"))
 try {
   await hooks["tool.execute.before"](
     { tool: "bash", sessionID: "ses_1", callID: "call_1" },
-    { args: { command: "rm -rf /" } },
+    { args },
   )
   console.log("ALLOWED")
 } catch (error) {
@@ -80,8 +87,14 @@ _STUBS = {
         'printf \'"reason":"arrived in two writes"}\'\n'
         "exit 0\n"
     ),
+    "whitespace": "cat >/dev/null\nprintf ' \\n\\t\\n'\nexit 0\n",
+    # Never reads stdin.  Paired with oversized arguments, the plugin is still
+    # writing when this exits, so the write ends in EPIPE.
+    "exit_0_without_reading": "sleep 0.2\nexit 0\n",
     "not_executable": None,  # written without the executable bit
 }
+
+_DEFAULT_ARGS = {"command": "rm -rf /"}
 
 
 class _Harness:
@@ -103,8 +116,9 @@ class _Harness:
     def remove_stub(self) -> None:
         (self.bin / "vectimus").unlink(missing_ok=True)
 
-    def run(self, *, timeout_ms: int = 3000) -> str:
+    def run(self, *, timeout_ms: int = 3000, args: dict | None = None) -> str:
         assert _RUNTIME is not None
+        (self.root / "args.json").write_text(json.dumps(args or _DEFAULT_ARGS))
         env = dict(os.environ)
         # The stub dir first, then the runtime's own dir and the standard
         # locations the stub shell script needs (sh, cat, sleep, kill).
@@ -172,6 +186,34 @@ def test_exit_one_with_empty_stdout_is_not_an_allow(harness: _Harness) -> None:
     output = harness.run()
     assert output.startswith("THREW:"), output
     assert "fail closed" in output
+
+
+def test_whitespace_on_stdout_is_not_an_allow(harness: _Harness) -> None:
+    """An allow is silence, and a stray newline is not silence.
+
+    Trimming stdout before testing it for emptiness would read a check that
+    printed a blank line -- a broken build, a debug echo, a shell wrapper --
+    as consent it never gave.
+    """
+    harness.write_stub(_STUBS["whitespace"])
+    output = harness.run()
+    assert output.startswith("THREW:"), output
+    assert "only whitespace" in output
+
+
+def test_a_check_that_exits_without_reading_the_call_throws(harness: _Harness) -> None:
+    """It cannot have judged a call it never received.
+
+    The write is left in flight and ends in EPIPE, while the rest of the
+    outcome -- exit 0, empty stdout -- is byte-for-byte an allow.  Swallowing
+    that error would turn any check that dies early into a pass.  The
+    arguments are oversized so the write is still going when the child exits;
+    small ones would fit the pipe buffer and complete regardless.
+    """
+    harness.write_stub(_STUBS["exit_0_without_reading"])
+    output = harness.run(args={"command": "echo " + "x" * 512_000})
+    assert output.startswith("THREW:"), output
+    assert "did not read the tool call" in output
 
 
 def test_a_hang_past_the_deadline_throws(harness: _Harness) -> None:

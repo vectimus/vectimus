@@ -6,9 +6,11 @@
 //
 // Evaluates every Pi tool call against Cedar policies by piping it to
 // `vectimus hook --source pi`.  The call is allowed only when that process
-// exits 0 with nothing on stdout.  Anything else -- a deny payload, output
-// that will not parse, a non-zero exit, a signal, a spawn failure, a missing
-// binary, or the deadline expiring -- blocks the tool call.
+// takes the whole payload and exits 0 with nothing at all on stdout.
+// Anything else -- a deny payload, output that will not parse, whitespace
+// where a verdict should be, a non-zero exit, a signal, a spawn failure, a
+// missing binary, a child that exits without reading the call, or the
+// deadline expiring -- blocks the tool call.
 //
 // Pi offers two ways to block, and both were verified against 0.73.1.
 // Returning `{ block: true, reason }` stops the tool and gives the reason to
@@ -73,12 +75,28 @@ function evaluate(payload: string): Promise<string | null> {
     let settled = false
     let stdout = ""
     let timer: ReturnType<typeof setTimeout> | undefined
+    // An allow needs both ends to have gone right: the check exited 0 with
+    // nothing to say, *and* it was handed the call it was meant to judge.
+    // Either half alone is what a broken check looks like.
+    let exitedSilently = false
+    let stdinSettled = false
+    let stdinError: string | undefined
 
     const finish = (reason: string | null) => {
       if (settled) return
       settled = true
       if (timer !== undefined) clearTimeout(timer)
       resolveVerdict(reason)
+    }
+
+    // Called from both ends; the last one to arrive decides.
+    const allowIfDelivered = () => {
+      if (!exitedSilently || !stdinSettled) return
+      if (stdinError !== undefined) {
+        finish(`policy check did not read the tool call: ${stdinError} (fail closed)`)
+        return
+      }
+      finish(null)
     }
 
     let child
@@ -126,18 +144,36 @@ function evaluate(payload: string): Promise<string | null> {
         finish(`policy check exited ${code} (fail closed)`)
         return
       }
+      // The only allow: exit 0 and literally nothing on stdout.  Whitespace
+      // is not nothing -- a check that printed a stray newline is a check
+      // that did not stay silent, and reading it as consent would trust
+      // output nobody meant to produce.
+      if (stdout.length === 0) {
+        exitedSilently = true
+        allowIfDelivered()
+        return
+      }
       const trimmed = stdout.trim()
-      // The only allow: exit 0 and nothing on stdout.
       if (trimmed.length === 0) {
-        finish(null)
+        finish("policy check printed only whitespace, not a verdict (fail closed)")
         return
       }
       finish(reasonFrom(trimmed))
     })
 
-    // The child can exit before reading all of stdin; that EPIPE is not a
-    // verdict, and the close handler already covers the outcome.
-    child.stdin?.on("error", () => {})
+    // A child that exits before reading the call never saw what it was asked
+    // to judge, and exiting 0 without printing is byte-for-byte what an allow
+    // looks like.  So the EPIPE that write leaves behind is a verdict of its
+    // own: record it, and let the allow path refuse rather than swallow it.
+    child.stdin?.on("error", (error: Error) => {
+      stdinError = error.message
+      stdinSettled = true
+      allowIfDelivered()
+    })
+    child.stdin?.on("finish", () => {
+      stdinSettled = true
+      allowIfDelivered()
+    })
     child.stdin?.end(payload)
   })
 }

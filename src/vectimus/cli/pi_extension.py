@@ -38,7 +38,7 @@ EXTENSION_VERSION = 1
 # entry: dropping one turns an untouched old install into a "user-modified"
 # refusal.
 SHIPPED_EXTENSION_DIGESTS: dict[int, str] = {
-    1: "1614a8058545aa5fd9bfab38e58bd76c077d8965475df496ef0cce61da4ee23c",
+    1: "fa7232e8e6078c27a0f6bdfad063e55863369f26a8af25222b49fa522dc7f5cc",
 }
 
 _MARKER_RE = re.compile(r"VECTIMUS-MANAGED\s+extension-version:\s*(\d+)")

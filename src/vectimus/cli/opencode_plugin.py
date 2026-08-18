@@ -38,7 +38,7 @@ PLUGIN_VERSION = 1
 # can still be recognised as unmodified and replaced.  Never remove an entry:
 # dropping one turns an untouched old install into a "user-modified" refusal.
 SHIPPED_PLUGIN_DIGESTS: dict[int, str] = {
-    1: "ffa6d1cea1ee7649a0a47685673eb638adadaa5bf9718237e5c3cb016016d01c",
+    1: "b9cc19fc9515c93a404beb2c67cd8c2de0e8a4d2349da69d6a6c60c361fd282d",
 }
 
 _MARKER_RE = re.compile(r"VECTIMUS-MANAGED\s+plugin-version:\s*(\d+)")
