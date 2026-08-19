@@ -46,7 +46,7 @@ docs/               # Documentation
 
 | Command | Purpose |
 |---------|---------|
-| `vectimus hook --source <tool>` | Unified hook entry point for Claude Code, Cursor, Copilot |
+| `vectimus hook --source <tool>` | Unified hook entry point for Claude Code, Cursor, Copilot, Gemini CLI, Codex CLI, OpenCode, Pi |
 | `vectimus init` | Detect tools, generate hook configs (merges with existing hooks) |
 | `vectimus remove` | Remove Vectimus hooks from detected tools in this project |
 | `vectimus test` | Test policies against sample events |

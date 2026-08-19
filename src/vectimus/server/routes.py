@@ -42,7 +42,8 @@ async def evaluate(request: Request) -> dict[str, Any]:
     """Evaluate an incoming tool action against Cedar policies.
 
     Accepts a raw tool event payload.  The ``X-Vectimus-Source`` header
-    identifies which tool sent the request (defaults to ``claude-code``).
+    identifies which tool sent the request and is required: without it the
+    request is denied rather than normalised under a guessed adapter.
     """
     global _event_counter
 
@@ -56,7 +57,18 @@ async def evaluate(request: Request) -> dict[str, Any]:
             ),
         )
 
-    source = request.headers.get("X-Vectimus-Source", "claude-code")
+    source = request.headers.get("X-Vectimus-Source")
+    if not source:
+        # Normalisation is source-specific; guessing one would evaluate the
+        # payload under the wrong adapter's assumptions.
+        return _build_response(
+            Decision(
+                decision=DecisionVerdict.DENY,
+                reason="Missing X-Vectimus-Source header (fail closed)",
+            ),
+            hook_event=body.get("hook_event_name") or body.get("hookEventName"),
+        )
+
     engine: PolicyEngine = request.app.state.engine
 
     try:

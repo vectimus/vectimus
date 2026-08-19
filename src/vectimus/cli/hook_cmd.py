@@ -26,8 +26,74 @@ from vectimus.engine.loader import PolicyLoader
 from vectimus.engine.models import Decision, DecisionVerdict, VectimusEvent
 from vectimus.engine.normaliser import normalise
 
-VALID_SOURCES = ("claude-code", "claude-agent-sdk", "cursor", "copilot", "gemini-cli", "codex")
+VALID_SOURCES = (
+    "claude-code",
+    "claude-agent-sdk",
+    "cursor",
+    "copilot",
+    "gemini-cli",
+    "codex",
+    "opencode",
+    "pi",
+)
 _HOOK_WRAPPER_SOURCES = ("claude-code", "claude-agent-sdk", "codex")
+
+# Sources whose deny payload is the flat {"decision", "reason"} shape.  For
+# OpenCode and Pi the consumer is the Vectimus plugin or extension itself,
+# which turns any stdout at all into a block -- neither agent has a native
+# deny JSON of its own.
+_SIMPLE_DENY_SOURCES = ("gemini-cli", "opencode", "pi")
+
+# Every evaluation path (server, daemon, inline) allows on an explicit ALLOW and
+# nothing else.  A missing, malformed or unknown verdict means the evaluation
+# cannot be trusted, so it denies rather than falling through.
+_UNRECOGNISED_VERDICT_REASON = "Vectimus: unrecognised policy verdict (fail closed)"
+
+# OpenCode and Pi have no native allow signal, so their plugin/extension reads
+# an allow as "exit 0 with empty stdout".  That alone cannot tell a real allow
+# from a `vectimus` that never ran: a shim that exits 0 without reading stdin
+# looks byte-for-byte identical.  So on these two sources every allow emits an
+# explicit acknowledgement the template verifies before permitting the call --
+# a child that exits 0 without reaching this allow path produces no ack and is
+# blocked.  Other sources (Claude Code, Cursor, ...) keep the empty-stdout
+# contract and never see this.
+_ALLOW_ACK_SOURCES = ("opencode", "pi")
+_ALLOW_ACK = b"VECTIMUS-ALLOW\n"
+
+
+def _emit_allow(source: str) -> None:
+    """Acknowledge an allow for the sources that require it, then exit 0.
+
+    The ack goes to the file descriptor named in ``VECTIMUS_ALLOW_ACK_FD`` --
+    the template opens fd 3 and points here at it -- so stdout stays clean for
+    the deny path's JSON.  When no such fd is wired up (a manual run, not the
+    template) the sentinel falls back to stdout, which the template still reads
+    as a non-empty, non-allow response and blocks on; either way a broken or
+    replaced binary cannot fall open.
+    """
+    if source in _ALLOW_ACK_SOURCES:
+        _write_allow_ack()
+    sys.exit(0)
+
+
+def _write_allow_ack() -> None:
+    """Write the allow sentinel to the ack fd, or to stdout if there is none."""
+    fd_raw = os.environ.get("VECTIMUS_ALLOW_ACK_FD")
+    if fd_raw:
+        try:
+            fd = int(fd_raw)
+        except (TypeError, ValueError):
+            fd = None
+        if fd is not None:
+            try:
+                os.write(fd, _ALLOW_ACK)
+                return
+            except OSError:
+                # The named fd is not open here after all; fall through to the
+                # stdout fallback rather than let an allow pass unacknowledged.
+                pass
+    sys.stdout.write(_ALLOW_ACK.decode())
+    sys.stdout.flush()
 
 
 def _log_stderr(msg: str) -> None:
@@ -84,7 +150,7 @@ def _deny_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": reason,
             "agent_message": reason,
         }
-    if source == "gemini-cli":
+    if source in _SIMPLE_DENY_SOURCES:
         return {
             "decision": "deny",
             "reason": reason,
@@ -125,7 +191,7 @@ def _escalate_output(source: str, payload: dict, reason: str) -> dict:
             "user_message": escalate_reason,
             "agent_message": agent_reason,
         }
-    if source == "gemini-cli":
+    if source in _SIMPLE_DENY_SOURCES:
         return {
             "decision": "deny",
             "reason": agent_reason,
@@ -230,6 +296,7 @@ def hook_cmd(source: str) -> None:
       echo '{"tool_name":"Bash",...}' | vectimus hook --source claude-code
       echo '{"command":"rm -rf /"}' | vectimus hook --source cursor
       echo '{"tool_name":"Bash",...}' | vectimus hook --source codex
+      echo '{"tool_name":"bash",...}' | vectimus hook --source opencode
     """
     # Redirect structlog to stderr so stdout stays clean for JSON responses.
     # AI tools parse stdout for hook decisions; stray log lines break parsing.
@@ -244,7 +311,7 @@ def hook_cmd(source: str) -> None:
     if not raw.strip():
         if debug:
             _log_stderr("empty stdin, allowing")
-        sys.exit(0)
+        _emit_allow(source)
 
     try:
         payload = json.loads(raw)
@@ -258,7 +325,7 @@ def hook_cmd(source: str) -> None:
     if source == "codex" and payload.get("hook_event_name") != "PreToolUse":
         if debug:
             _log_stderr("codex hook outside PreToolUse, allowing without evaluation")
-        sys.exit(0)
+        _emit_allow(source)
 
     project_path = _project_path_from_payload(source, payload)
 
@@ -270,20 +337,28 @@ def hook_cmd(source: str) -> None:
     if server_url:
         result = _post_to_server(payload, server_url, source)
         if result is not None:
-            decision_val = result.get("decision", "deny")
+            decision_val = result.get("decision")
             if decision_val in (DecisionVerdict.DENY, DecisionVerdict.ESCALATE):
-                hook_output = result.get("hookSpecificOutput")
-                if hook_output is None or source not in _HOOK_WRAPPER_SOURCES:
-                    reason = result.get("reason", "Denied by Vectimus")
-                    if decision_val == DecisionVerdict.ESCALATE:
-                        _emit_deny(source, payload, reason, escalate=True)
-                    else:
-                        _emit_deny(source, payload, reason)
-                print(json.dumps(hook_output))
-                if source == "cursor":
-                    sys.exit(2)
-                sys.exit(0)
-            sys.exit(0)
+                # Always rebuild the deny/escalate payload locally from the
+                # verdict. The server's own hookSpecificOutput is never
+                # relayed: it is emitted without the wrapper Claude Code
+                # expects, and an ESCALATE arrives as permissionDecision
+                # "ask" which would prompt-to-approve instead of hard-denying
+                # (v1 escalate is a hard deny). Rebuilding keeps the source's
+                # exact output contract and the verdict authoritative.
+                reason = result.get("reason", "Denied by Vectimus")
+                _emit_deny(
+                    source,
+                    payload,
+                    reason,
+                    escalate=(decision_val == DecisionVerdict.ESCALATE),
+                )
+            if decision_val == DecisionVerdict.ALLOW:
+                _emit_allow(source)
+            # Anything else — missing, misspelled, wrong type, a verdict from a
+            # newer server this client does not understand — is not an allow.
+            _log_stderr(f"unrecognised server decision {decision_val!r} (fail closed)")
+            _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
 
     # Try daemon first (eliminates ~200ms Python startup on repeat calls).
     from vectimus.cli.daemon_client import daemon_evaluate
@@ -295,7 +370,7 @@ def hook_cmd(source: str) -> None:
         if debug:
             _log_stderr(f"daemon decision={daemon_result.get('decision')}")
 
-        verdict = daemon_result.get("decision", "allow")
+        verdict = daemon_result.get("decision")
         receipt_id = daemon_result.get("receipt_id")
 
         if verdict == DecisionVerdict.ESCALATE:
@@ -314,8 +389,13 @@ def hook_cmd(source: str) -> None:
             _log_stderr_overrides(matched)
             _emit_deny(source, payload, reason)
 
-        # ALLOW — exit cleanly
-        sys.exit(0)
+        if verdict == DecisionVerdict.ALLOW:
+            _emit_allow(source)
+
+        # Only an explicit allow allows.  A daemon that answers with a missing
+        # or unrecognised verdict is not trusted to have evaluated anything.
+        _log_stderr(f"unrecognised daemon decision {verdict!r} (fail closed)")
+        _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
 
     # Inline fallback (daemon unavailable)
     if debug:
@@ -335,6 +415,15 @@ def hook_cmd(source: str) -> None:
         reason = "Vectimus normalisation error (fail closed)"
         if source == "cursor":
             reason = "Normalisation error (fail closed)"
+        else:
+            from vectimus.adapters.opencode import OpenCodeNormalisationError
+            from vectimus.adapters.pi import PiNormalisationError
+
+            # The strict adapters' refusals name the tool and point at their
+            # inventory doc, which is what the agent needs to act on the
+            # block.  The daemon path already passes this detail through.
+            if isinstance(exc, OpenCodeNormalisationError | PiNormalisationError):
+                reason = f"Vectimus: {exc} (fail closed)"
         _emit_deny(source, payload, reason)
 
     loader = PolicyLoader(project_path=project_path)
@@ -406,6 +495,10 @@ def hook_cmd(source: str) -> None:
         _log_stderr_overrides(decision.matched_policy_ids)
         _emit_deny(source, payload, reason)
 
+    if decision.decision != DecisionVerdict.ALLOW:
+        _log_stderr(f"unrecognised inline decision {decision.decision!r} (fail closed)")
+        _emit_deny(source, payload, _UNRECOGNISED_VERDICT_REASON)
+
     # Background policy update check (non-blocking, never breaks hook).
     # Only runs when auto_sync is explicitly enabled in config.
     try:
@@ -421,7 +514,7 @@ def hook_cmd(source: str) -> None:
     except Exception:
         pass
 
-    sys.exit(0)
+    _emit_allow(source)
 
 
 def _generate_receipt_async(

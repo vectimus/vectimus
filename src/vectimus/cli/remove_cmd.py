@@ -9,6 +9,8 @@ import click
 
 from vectimus.cli.detect import ToolName, detect_all
 from vectimus.cli.init_cmd import _command_references_vectimus_source, _is_vectimus_hook
+from vectimus.cli.opencode_plugin import installed_plugin_paths, remove_plugin
+from vectimus.cli.pi_extension import installed_extension_paths, remove_extension
 
 
 @click.command("remove")
@@ -23,6 +25,9 @@ def remove_cmd(force: bool) -> None:
 
     Removes hook entries from Claude Code, Cursor, Copilot, Gemini CLI and
     Codex CLI config files. Preserves any non-Vectimus hooks in those files.
+    Deletes the OpenCode plugin and Pi extension files, but only while they
+    still carry the Vectimus marker -- an edited copy is left for the user to
+    deal with.
     Does not remove ~/.vectimus/ config or audit logs.
 
     \b
@@ -65,6 +70,18 @@ def remove_cmd(force: bool) -> None:
             if path.exists() and _has_vectimus_hooks_codex(path):
                 removals.append(("Codex CLI", path))
 
+        elif tool_name == ToolName.OPENCODE:
+            # Both the user-level and project-level plugin can be installed;
+            # OpenCode loads both, so both have to go.
+            for plugin_path in installed_plugin_paths():
+                removals.append(("OpenCode", plugin_path))
+
+        elif tool_name == ToolName.PI:
+            # Same union rule as OpenCode: user-level and project-level
+            # extensions both load, so both have to go.
+            for extension_path in installed_extension_paths():
+                removals.append(("Pi", extension_path))
+
     if not removals:
         click.echo("No Vectimus hooks found in this project.")
         return
@@ -82,16 +99,33 @@ def remove_cmd(force: bool) -> None:
         "VS Code / Copilot": _remove_copilot,
         "Gemini CLI": _remove_gemini_cli,
         "Codex CLI": _remove_codex_cli,
+        "OpenCode": _remove_opencode,
+        "Pi": _remove_pi,
     }
 
     for display_name, path in removals:
         handler = remove_dispatch.get(display_name)
         if handler:
             handler(path)
-        click.echo(f"  [-] {display_name:<18} hooks removed")
+        artefact = _REMOVED_ARTEFACT.get(display_name, "hooks removed")
+        click.echo(f"  [-] {display_name:<18} {artefact}")
 
-    click.echo(f"\nRemoved Vectimus from {len(removals)} tool(s).")
+    click.echo(f"\nRemoved Vectimus from {len({name for name, _ in removals})} tool(s).")
     click.echo("To reinstall: vectimus init")
+
+
+# What `remove` says it took away, for the tools that are not hook config.
+_REMOVED_ARTEFACT = {"OpenCode": "plugin removed", "Pi": "extension removed"}
+
+
+def _remove_opencode(plugin_path: Path) -> None:
+    """Delete the Vectimus OpenCode plugin file."""
+    remove_plugin(plugin_path)
+
+
+def _remove_pi(extension_path: Path) -> None:
+    """Delete the Vectimus Pi extension file."""
+    remove_extension(extension_path)
 
 
 def _has_vectimus_hooks_claude(settings_path: Path) -> bool:
@@ -274,9 +308,8 @@ def _remove_gemini_cli(settings_path: Path) -> None:
 
 def _is_vectimus_codex_hook(hook: dict) -> bool:
     """Check if a Codex hook definition was created by Vectimus."""
-    return (
-        hook.get("type") == "command"
-        and _command_references_vectimus_source(hook.get("command", ""), "codex")
+    return hook.get("type") == "command" and _command_references_vectimus_source(
+        hook.get("command", ""), "codex"
     )
 
 
